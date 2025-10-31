@@ -287,9 +287,34 @@ class Fish {
             speed = this.maxSpeed;
         }
 
-        // Move by velocity scaled by dt
-        this.x += this.vx * dt;
-        this.y += this.vy * dt;
+        // Move by velocity scaled by dt, but enforce deep-water constraint hard
+        let nx = this.x + this.vx * dt;
+        let ny = this.y + this.vy * dt;
+        const nTileX = Math.floor(nx / TILE_SIZE);
+        const nTileY = Math.floor(ny / TILE_SIZE);
+        if (getTileType(nTileX, nTileY) === TILE_TYPES.DEEP_WATER) {
+            this.x = nx;
+            this.y = ny;
+        } else {
+            // Snap back into nearest deep water and steer inward
+            const deep = findNearestDeepWater(nx, ny) || findNearestDeepWater(this.x, this.y);
+            if (deep) {
+                this.x = deep.x;
+                this.y = deep.y;
+                const dir = direction(this.x, this.y, deep.x, deep.y);
+                const speedAfter = Math.max(this.minSpeed, Math.min(this.targetSpeed, this.maxSpeed)) * 0.6;
+                if (dir.d > 0) {
+                    this.vx = dir.x * speedAfter;
+                    this.vy = dir.y * speedAfter;
+                }
+                // Bias future steering toward centre of deep area
+                this.waypoint = deep;
+            } else {
+                // As a safeguard, reflect and dampen velocity
+                this.vx *= -0.5;
+                this.vy *= -0.5;
+            }
+        }
 
         return false;
     }
