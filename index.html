@@ -126,14 +126,26 @@ const PLAYER_EMOJIS = {
     ROWING: '\u{1F6A3}'    // ðŸš£
 };
 
-// Candidate NPC emojis (rendering varies by platform)
-const NPC_EMOJIS = [
-    '\u{1F9D9}', // Mage
-    '\u{1F9DD}', // Elf
-    '\u{1F9DE}', // Genie
-    '\u{1F9DF}', // Zombie
-    '\u{1F471}', // Person with blond hair
-    '\u{1F9D1}'  // Person
+// NPC types with emoji and speech
+const NPC_TYPES = [
+    { emoji: '\u{1F9D9}', name: 'Mage', speech: 'Seeking arcane knowledge?' },
+    { emoji: '\u{1F9D9}\u200D\u2642\uFE0F', name: 'Wizard', speech: 'The stars align tonight...' },
+    { emoji: '\u{1F9DD}', name: 'Elf', speech: 'The forest calls to me.' },
+    { emoji: '\u{1F9DE}', name: 'Genie', speech: 'Three wishes? Not today.' },
+    { emoji: '\u{1F9DF}', name: 'Zombie', speech: 'Braaaains... or gold?' },
+    { emoji: '\u{1F9D1}\u200D\u{1F373}', name: 'Cook', speech: 'Fancy a hot meal?' },
+    { emoji: '\u{1F9D1}\u200D\u{1F33E}', name: 'Farmer', speech: 'Good harvest this year.' },
+    { emoji: '\u{1F46E}', name: 'Guard', speech: 'Stay out of trouble.' },
+    { emoji: '\u{1F9B8}', name: 'Hero', speech: 'Evil shall not prevail!' },
+    { emoji: '\u{1F9D1}\u200D\u2696\uFE0F', name: 'Judge', speech: 'Justice will be served.' },
+    { emoji: '\u{1F473}', name: 'Merchant', speech: 'Finest wares in the land!' },
+    { emoji: '\u{1F9D9}\u200D\u2640\uFE0F', name: 'Witch', speech: 'Need a potion?' },
+    { emoji: '\u{1F935}', name: 'Sage', speech: 'Wisdom comes with time.' },
+    { emoji: '\u{1F478}', name: 'Princess', speech: 'Have you seen my kingdom?' },
+    { emoji: '\u{1F934}', name: 'Prince', speech: 'Adventure awaits!' },
+    { emoji: '\u{1F9DB}', name: 'Vampire', speech: 'The night is young...' },
+    { emoji: '\u{1F9D1}\u200D\u{1F52C}', name: 'Scientist', speech: 'Fascinating discovery!' },
+    { emoji: '\u{1F9D1}\u200D\u{1F3A8}', name: 'Artist', speech: 'Beauty is everywhere.' }
 ];
 
 // BOID parameters
@@ -1069,10 +1081,36 @@ function drawEmojiWithLegs(emoji, worldX, worldY, sizePx, phase, options = {}) {
 }
 
 function drawNPCs() {
-    // Small count, so direct loop is fine
+    // Draw NPCs with legs and show speech on hover or proximity
     const size = TILE_SIZE * 1.2;
+    const playerDist = 80; // show speech if player within this distance
     for (const n of npcs) {
         drawEmojiWithLegs(n.emoji, n.x, n.y, size, n.phase, { swingAmp: 0.15, swingSpeed: 1.5 });
+        
+        // Show name and speech bubble if player is close
+        const d = distance(player.x, player.y, n.x, n.y);
+        if (d < playerDist) {
+            const screenX = n.x - camera.x;
+            const screenY = n.y - camera.y;
+            ctx.save();
+            ctx.font = '10px Arial';
+            ctx.fillStyle = 'rgba(0,0,0,0.8)';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            
+            // Name above
+            ctx.fillText(n.name, screenX + size * 0.5, screenY - size * 0.3);
+            
+            // Speech bubble below
+            ctx.font = '9px Arial';
+            ctx.fillStyle = 'rgba(255,255,255,0.95)';
+            const bubbleY = screenY + size * 1.4;
+            const textWidth = ctx.measureText(n.speech).width;
+            ctx.fillRect(screenX + size * 0.5 - textWidth / 2 - 4, bubbleY - 12, textWidth + 8, 14);
+            ctx.fillStyle = 'rgba(0,0,0,0.9)';
+            ctx.fillText(n.speech, screenX + size * 0.5, bubbleY);
+            ctx.restore();
+        }
     }
 }
 
@@ -1797,21 +1835,28 @@ async function initializeGame() {
 
     await loadNewArea();
 
-    // Spawn a few NPCs near the player on walkable land
+    // Spawn NPCs scattered across the initial area on walkable land
     (function spawnNPCsNearPlayer(count) {
         let spawned = 0, tries = 0;
-        while (spawned < count && tries++ < 200) {
+        while (spawned < count && tries++ < 300) {
             const ang = Math.random() * Math.PI * 2;
-            const dist = 60 + Math.random() * 240; // within ~12 tiles
+            const dist = 80 + Math.random() * 400; // spread over wider area
             const x = player.x + Math.cos(ang) * dist;
             const y = player.y + Math.sin(ang) * dist;
             if (isWalkable(x, y, false, false)) {
-                const emoji = NPC_EMOJIS[Math.floor(Math.random() * NPC_EMOJIS.length)];
-                npcs.push({ x, y, emoji, phase: Math.random() * Math.PI * 2 });
+                const npcType = NPC_TYPES[Math.floor(Math.random() * NPC_TYPES.length)];
+                npcs.push({ 
+                    x, 
+                    y, 
+                    emoji: npcType.emoji, 
+                    name: npcType.name,
+                    speech: npcType.speech,
+                    phase: Math.random() * Math.PI * 2 
+                });
                 spawned++;
             }
         }
-    })(3);
+    })(15);
 
     loadingIndicator.style.display = 'none';
     gameLoop();
