@@ -14,7 +14,7 @@ A tiny browser-based world rendered on a canvas with procedurally generated biom
 
 ## How to run
 
-- Open `Emojicka.html` directly in a modern desktop browser.
+- Open `index.html` directly in a modern desktop browser.
 - Resize the window as you like; the canvas adapts.
 
 ## Controls
