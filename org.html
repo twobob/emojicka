@@ -1,0 +1,1745 @@
+<!DOCTYPE html>
+<html><head><base href="https://ψπ.com/dev/world/"><title>Emojicka World - Wildlife and Gold Rush</title>
+<style>
+body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; font-family: Arial, sans-serif; font-size: 1.5em; }
+#gameCanvas { background: #8FBC8F; }
+#ui { position: fixed; top: 10px; left: 10px; background: rgba(255,255,255,0.7); padding: 10px; border-radius: 5px; z-index: 10; }
+#posi {font-size: .5em;}
+#wealthUI { position: fixed; top: 10px; right: 10px; background: rgba(255,255,255,0.7); padding: 10px; border-radius: 5px; z-index: 10; }
+#pathfindingDialog { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); background: white; padding: 20px; border-radius: 5px; box-shadow: 0 0 10px rgba(0,0,0,0.3); z-index: 20; }
+#loadingIndicator { display: none; position: fixed; bottom: 10px; right: 10px; background: rgba(0,0,0,0.7); color: white; padding: 10px; border-radius: 5px; z-index: 30; }
+#minimap { position: fixed; bottom: 10px; right: 10px; width: 350px; height: 350px; background: rgba(0,0,0,0.5); border: 2px solid white; z-index: 40; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<div id="ui">
+    <div id="posi">Position: X: <span id="xPos"></span>, Y: <span id="yPos"></span></div>
+    <div>Biome: <span id="biome"></span></div>
+    <div>Status: <span id="status"></span></div>
+    <div>Idea: <span id="plan"></span></div>
+</div>
+<div id="wealthUI">
+    <div>Gold: <span id="goldCount">0</span></div>
+</div>
+<div id="pathfindingDialog">
+    <h3>Enter Target Position</h3>
+    <form id="pathfindingForm">
+        <label for="targetX">X:</label>
+        <input type="number" id="targetX" required><br><br>
+        <label for="targetY">Y:</label>
+        <input type="number" id="targetY" required><br><br>
+        <button type="submit">Find Path</button>
+    </form>
+</div>
+<div id="loadingIndicator">Loading...</div>
+<canvas id="minimap"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const minimapCanvas = document.getElementById('minimap');
+const minimapCtx = minimapCanvas.getContext('2d');
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+minimapCanvas.width = 200;
+minimapCanvas.height = 200;
+
+const xPosElement = document.getElementById('xPos');
+const yPosElement = document.getElementById('yPos');
+const biomeElement = document.getElementById('biome');
+const statusElement = document.getElementById('status');
+const planElement = document.getElementById('plan');
+const goldCountElement = document.getElementById('goldCount');
+const pathfindingDialog = document.getElementById('pathfindingDialog');
+const pathfindingForm = document.getElementById('pathfindingForm');
+const targetXInput = document.getElementById('targetX');
+const targetYInput = document.getElementById('targetY');
+const loadingIndicator = document.getElementById('loadingIndicator');
+
+const MAX_SEARCH_DISTANCE = 4096; // 204.8 tiles at 20 pixels per tile
+const MAX_ANIMAL_SEARCH_DISTANCE = 400; // Max search distance for animal random path
+
+/* const TILE_TYPES = {
+    BEACH: 'beach',
+    GRASS: 'grass',
+    FOREST: 'forest',
+    DESERT: 'desert',
+    ROCK: 'rock',
+    DEEP_WATER: 'deep_water',
+    SHALLOW_WATER: 'shallow_water'
+}; */
+
+const TILE_TYPES = {
+    DEEP_WATER: 0, SHALLOW_WATER: 1, BEACH: 2, GRASS: 3, FOREST: 4, DESERT: 5, ROCK: 6
+};
+
+let lastPathCompletionTime = 0;
+const AUTO_PATH_DELAY = 2000; // 2 seconds in milliseconds
+
+const TILE_SIZE = 20;
+const CHUNK_SIZE = 40;
+const WORLD_WIDTH = 200;
+const WORLD_HEIGHT = 200;
+const MINIMAP_SCALE = 0.08;
+const BOAT_SPAWN_CHANCE = 0.05;
+const GOLD_SPAWN_CHANCE = 0.002;
+const ANIMAL_SPAWN_CHANCE = 0.005;
+
+const ANIMAL_DEATH_CHANCE = 0.0001;
+
+const FISH_SPAWN_CHANCE = 0.001;
+const ANIMAL_SPAWN_MAX = 200;
+const LAND_ANIMAL_SPAWN_MAX = ANIMAL_SPAWN_MAX / 2;
+const FISH_SPAWN_MAX = ANIMAL_SPAWN_MAX / 2;
+
+
+const GOLD_PICKUP_RADIUS = 2 * TILE_SIZE; // More forgiving pickup radius
+
+
+//const ANIMAL_TYPES = ['ðŸ¦Œ', 'ðŸ»', 'ðŸº', 'ðŸ¦Š', 'ðŸ°'];
+//const ANIMAL_TYPES = ['\u{1F98C}', '\u{1F43B}', '\u{1F43A}', '\u{1F98A}', '\u{1F430}', '\u{1F41F}'];
+
+
+const ANIMAL_TYPES = [
+  '\u{1F98C}', // Deer
+  '\u{1F43B}', // Bear
+  '\u{1F43A}', // Wolf
+  '\u{1F98A}', // Fox
+  '\u{1F430}', // Rabbit
+  '\u{1F434}', // Horse
+  '\u{1F437}', // Pig
+  '\u{1F42E}', // Cow
+  '\u{1F411}', // Sheep
+  '\u{1F418}', // Elephant
+  '\u{1F42D}', // Mouse
+  '\u{1F42F}', // Tiger
+  '\u{1F41F}'  // Fish
+];
+
+
+const PLAYER_EMOJIS = {
+    STANDING: '\u{1F9CD}', // ðŸ§
+    WALKING: '\u{1F6B6}',  // ðŸš¶
+    RUNNING: '\u{1F3C3}',  // ðŸƒ
+    ROWING: '\u{1F6A3}'    // ðŸš£
+};
+
+// BOID parameters
+const SEPARATION_DISTANCE = 50;
+const ALIGNMENT_DISTANCE = 100;
+const COHESION_DISTANCE = 150;
+const MAX_SPEED = 50;
+const MAX_FORCE = 0.02;
+
+// animation parameters
+const ANIMATION_INTERVAL = 50; // milliseconds between frames
+
+let playerAnimationFrame = 0;
+let lastAnimationTime = 0;
+
+let animatedEmojis = [];
+
+let frameTimeSum = 0;
+let lastFrameTime = performance.now();
+let animalPathTimeSum = 0;
+let frameCount = 0;
+
+let chunks = {};
+let boats = [];
+let goldNuggets = [];
+let landAnimals = [];
+let fishFlock = [];
+let totalFrameTime = 0;
+
+methodTimes = {};
+
+let camera = {x: 0, y: 0};
+let path = [];
+let target = null;
+
+player = {
+    x: 0, y: 0, size: 20, speed: 2, inBoat: false, gold: 0,
+    isMoving: false,
+    currentEmoji: PLAYER_EMOJIS.STANDING,
+    direction: 'left' // 'left' or 'right'
+};
+
+class Fish {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        // Velocity in px/sec; start with a random heading
+        const angle = Math.random() * Math.PI * 2;
+        this.vx = Math.cos(angle);
+        this.vy = Math.sin(angle);
+
+        // Steering and timing controls (all per-fish to stagger work)
+        const now = Date.now();
+        this.nextSteerTime = now + 100 + Math.random() * 500; // 100-600ms
+        this.nextWaypointTime = now + 3000 + Math.random() * 5000; // 3-8s
+        this.nextSpeedTime = now + 2000 + Math.random() * 4000; // 2-6s
+        this.lastMoveTime = now; // for dt integration
+
+        // Waypoint the fish tends to head towards (in world px)
+        this.waypoint = null;
+
+        // Smooth speed variation (px/sec)
+        this.speed = 25 + Math.random() * 25; // 25-50
+        this.targetSpeed = this.speed;
+        this.maxSpeed = 60; // hard cap px/sec
+        this.minSpeed = 10;
+
+        // Cached steering force to reuse between steer ticks
+        this.ax = 0;
+        this.ay = 0;
+
+        this.lifespan = Math.random() * 345000 + 15000; // Random lifespan between 15 and 360 seconds
+        this.birthTime = Date.now(); // Record the birth time
+    }
+
+    update(neighbors, currentTime) {
+        // Expiry check
+        if (currentTime - this.birthTime > this.lifespan) return true;
+
+        // Decide new waypoint occasionally; pick mostly ahead of current heading with jitter
+        if (currentTime >= this.nextWaypointTime || !this.waypoint) {
+            const aheadDist = 150 + Math.random() * 250; // 150-400 px
+            const jitter = (Math.random() - 0.5) * Math.PI * 0.5; // +/- 90deg jitter
+            const heading = Math.atan2(this.vy, this.vx) + jitter;
+            let wx = this.x + Math.cos(heading) * aheadDist;
+            let wy = this.y + Math.sin(heading) * aheadDist;
+            // Keep inside deep water if possible
+            const deep = findNearestDeepWater(wx, wy);
+            if (deep) { wx = deep.x; wy = deep.y; }
+            this.waypoint = { x: wx, y: wy };
+            this.nextWaypointTime = currentTime + 3000 + Math.random() * 5000; // 3-8s
+        }
+
+        // Smoothly vary target speed sometimes
+        if (currentTime >= this.nextSpeedTime) {
+            this.targetSpeed = this.minSpeed + Math.random() * (this.maxSpeed - this.minSpeed);
+            this.nextSpeedTime = currentTime + 2000 + Math.random() * 4000; // 2-6s
+        }
+
+        // Occasionally recompute steering forces; otherwise reuse cached ax/ay to be cheap
+        if (currentTime >= this.nextSteerTime) {
+            const separation = this.separate(neighbors);
+            const alignment = this.align(neighbors);
+            const cohesion = this.cohesion(neighbors);
+            const stayInWater = this.stayInDeepWater();
+            const toWaypoint = this.seekWaypoint();
+            const wander = this.wander();
+
+            // Blend forces with conservative weights for smoothness
+            const wSep = 1.4, wAli = 0.6, wCoh = 0.35, wWater = 2.5, wWp = 0.7, wWan = 0.25;
+            this.ax = separation.x * wSep + alignment.x * wAli + cohesion.x * wCoh + stayInWater.x * wWater + toWaypoint.x * wWp + wander.x * wWan;
+            this.ay = separation.y * wSep + alignment.y * wAli + cohesion.y * wCoh + stayInWater.y * wWater + toWaypoint.y * wWp + wander.y * wWan;
+
+            // Stagger next steer so not all fish think on same tick
+            this.nextSteerTime = currentTime + 120 + Math.random() * 380; // 120-500ms
+        }
+
+        // Integrate motion with dt for smooth movement
+        const dt = Math.max(0, (currentTime - this.lastMoveTime) / 1000);
+        this.lastMoveTime = currentTime;
+
+        // Accelerate by cached steering, with gentle damping to avoid runaway
+        const damping = 0.98;
+        this.vx = (this.vx + this.ax) * damping;
+        this.vy = (this.vy + this.ay) * damping;
+
+        // Adjust speed smoothly toward targetSpeed
+        let speed = Math.hypot(this.vx, this.vy);
+        const desired = this.targetSpeed;
+        if (speed > 1e-3) {
+            const scaled = easeScalar(speed, desired, dt, 0.75);
+            const s = scaled / speed;
+            this.vx *= s; this.vy *= s;
+            speed = scaled;
+        } else {
+            // If nearly stopped, nudge forward along last acceleration or a random heading
+            const ang = Math.atan2(this.ay, this.ax) || Math.random() * Math.PI * 2;
+            this.vx = Math.cos(ang) * desired;
+            this.vy = Math.sin(ang) * desired;
+        }
+
+        // Hard clamp to absolute cap just in case
+        if (speed > this.maxSpeed) {
+            this.vx = (this.vx / speed) * this.maxSpeed;
+            this.vy = (this.vy / speed) * this.maxSpeed;
+            speed = this.maxSpeed;
+        }
+
+        // Move by velocity scaled by dt
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+
+        return false;
+    }
+
+    separate(neighbors) {
+        let steerX = 0, steerY = 0, count = 0;
+    let processed = 0, limit = 16; // cap neighbour samples for perf
+        for (const other of neighbors) {
+            const dx = this.x - other.x;
+            const dy = this.y - other.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance > 0 && distance < SEPARATION_DISTANCE) {
+                steerX += dx / distance;
+                steerY += dy / distance;
+                count++;
+            }
+            processed++;
+            if (processed >= limit) break;
+        }
+        if (count > 0) {
+            steerX /= count;
+            steerY /= count;
+            const steerMag = Math.sqrt(steerX * steerX + steerY * steerY);
+            if (steerMag > 0) {
+                steerX = (steerX / steerMag) * MAX_FORCE;
+                steerY = (steerY / steerMag) * MAX_FORCE;
+            }
+        }
+        return { x: steerX, y: steerY };
+    }
+
+    align(neighbors) {
+        let avgVX = 0, avgVY = 0, count = 0;
+    let processed = 0, limit = 16; // cap neighbour samples for perf
+        for (const other of neighbors) {
+            const dx = this.x - other.x;
+            const dy = this.y - other.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance > 0 && distance < ALIGNMENT_DISTANCE) {
+                avgVX += other.vx;
+                avgVY += other.vy;
+                count++;
+            }
+            processed++;
+            if (processed >= limit) break;
+        }
+        if (count > 0) {
+            avgVX /= count;
+            avgVY /= count;
+            const mag = Math.sqrt(avgVX * avgVX + avgVY * avgVY);
+            if (mag > 0) {
+                avgVX = (avgVX / mag) * MAX_FORCE;
+                avgVY = (avgVY / mag) * MAX_FORCE;
+            }
+        }
+        return { x: avgVX, y: avgVY };
+    }
+
+    cohesion(neighbors) {
+        let centerX = 0, centerY = 0, count = 0;
+    let processed = 0, limit = 16; // cap neighbour samples for perf
+        for (const other of neighbors) {
+            const dx = this.x - other.x;
+            const dy = this.y - other.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance > 0 && distance < COHESION_DISTANCE) {
+                centerX += other.x;
+                centerY += other.y;
+                count++;
+            }
+            processed++;
+            if (processed >= limit) break;
+        }
+        if (count > 0) {
+            centerX /= count;
+            centerY /= count;
+            const dx = centerX - this.x;
+            const dy = centerY - this.y;
+            const mag = Math.sqrt(dx * dx + dy * dy);
+            if (mag > 0) {
+                return {
+                    x: (dx / mag) * MAX_FORCE,
+                    y: (dy / mag) * MAX_FORCE
+                };
+            }
+        }
+        return { x: 0, y: 0 };
+    }
+
+    stayInDeepWater() {
+        const tileX = Math.floor(this.x / TILE_SIZE);
+        const tileY = Math.floor(this.y / TILE_SIZE);
+        if (getTileType(tileX, tileY) !== TILE_TYPES.DEEP_WATER) {
+            // Find nearest deep water tile
+            const nearestDeepWater = findNearestDeepWater(this.x, this.y);
+            if (nearestDeepWater) {
+                const dx = nearestDeepWater.x - this.x;
+                const dy = nearestDeepWater.y - this.y;
+                const mag = Math.sqrt(dx * dx + dy * dy);
+                if (mag > 0) {
+                    return {
+                        x: (dx / mag) * MAX_FORCE * 5, // Much stronger force to stay in deep water
+                        y: (dy / mag) * MAX_FORCE * 5
+                    };
+                }
+            }
+        }
+        return { x: 0, y: 0 };
+    }
+
+    seekWaypoint() {
+        if (!this.waypoint) return { x: 0, y: 0 };
+        const dx = this.waypoint.x - this.x;
+        const dy = this.waypoint.y - this.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 20) return { x: 0, y: 0 }; // close enough; don't oversteer
+        const nx = dx / dist, ny = dy / dist;
+        return { x: nx * MAX_FORCE, y: ny * MAX_FORCE };
+    }
+
+    wander() {
+        // Small random turning to avoid perfect alignment
+        const angleJitter = (Math.random() - 0.5) * 0.3; // +/-0.15 rad
+        const h = Math.atan2(this.vy, this.vx) + angleJitter;
+        return { x: Math.cos(h) * MAX_FORCE * 0.5, y: Math.sin(h) * MAX_FORCE * 0.5 };
+    }
+}
+
+
+// Land animal with centralized update: variable speed, cheap wandering, occasional pathing
+class LandAnimal {
+    constructor(x, y, type) {
+        this.x = x;
+        this.y = y;
+        this.type = type;
+        this.isFish = false;
+
+        // Movement and timing
+        const now = Date.now();
+        this.vx = 0; this.vy = 0;
+        this.speed = 30 + Math.random() * 20; // 30-50 px/sec
+        this.targetSpeed = this.speed;
+        this.minSpeed = 10; this.maxSpeed = 70;
+        this.nextSpeedTime = now + 2000 + Math.random() * 4000; // 2-6s
+        this.lastMoveTime = now;
+
+    // Behaviour control: 'wander' or 'path'
+        this.behavior = 'wander';
+        this.nextBehaviorTime = now + 3000 + Math.random() * 6000; // 3-9s
+
+        // Wandering
+        this.waypoint = null;
+        this.nextWanderPick = now + 800 + Math.random() * 1500; // 0.8-2.3s
+
+        // Pathing
+        this.path = [];
+        this.nextPathfindingTime = now + 1500 + Math.random() * 2500; // 1.5-4s
+    }
+
+    update(currentTime) {
+        // Decide on behaviour periodically
+        if (currentTime >= this.nextBehaviorTime) {
+            // 45% wander, 55% path for a bit of intent
+            this.behavior = Math.random() < 0.45 ? 'wander' : 'path';
+            this.nextBehaviorTime = currentTime + 3000 + Math.random() * 7000; // 3-10s
+            // Clear or plan accordingly
+            if (this.behavior === 'wander') {
+                this.path = [];
+                this.waypoint = null; // will pick soon
+            } else {
+                // force a plan soon
+                this.nextPathfindingTime = Math.min(this.nextPathfindingTime, currentTime + 200);
+            }
+        }
+
+        // Smooth speed changes
+        if (currentTime >= this.nextSpeedTime) {
+            this.targetSpeed = this.minSpeed + Math.random() * (this.maxSpeed - this.minSpeed);
+            this.nextSpeedTime = currentTime + 2000 + Math.random() * 4000;
+        }
+
+        const dt = Math.max(0, (currentTime - this.lastMoveTime) / 1000);
+        this.lastMoveTime = currentTime;
+
+        // Ease current speed
+        const velMag = Math.hypot(this.vx, this.vy);
+        const desired = this.targetSpeed;
+        if (velMag > 1e-3) {
+            const scaled = easeScalar(velMag, desired, dt, 0.9);
+            const s = scaled / velMag;
+            this.vx *= s; this.vy *= s;
+        }
+
+        if (this.behavior === 'wander') {
+            this.updateWander(currentTime, dt);
+        } else {
+            this.updatePathing(currentTime, dt);
+        }
+    }
+
+    updateWander(currentTime, dt) {
+        // Occasionally pick a small local waypoint and walk toward it
+        if (currentTime >= this.nextWanderPick || !this.waypoint) {
+            const rangeTiles = 4 + Math.floor(Math.random() * 4); // 4-7 tiles
+            this.waypoint = pickLocalWaypoint(this.x, this.y, rangeTiles, isWalkableLand);
+            this.nextWanderPick = currentTime + 1000 + Math.random() * 2000; // 1-3s
+        }
+
+        if (this.waypoint) {
+            const dx = this.waypoint.x - this.x;
+            const dy = this.waypoint.y - this.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < 2) {
+                this.waypoint = null; // reached; will pick a new one later
+            } else {
+                const step = this.targetSpeed * dt;
+                const nx = dx / dist, ny = dy / dist;
+                const nxPos = this.x + nx * step;
+                const nyPos = this.y + ny * step;
+                if (isWalkable(nxPos, nyPos, false, false)) {
+                    this.x = nxPos; this.y = nyPos;
+                    this.vx = nx * this.targetSpeed; this.vy = ny * this.targetSpeed;
+                } else {
+                    // blocked, force new pick next tick
+                    this.waypoint = null;
+                }
+            }
+        }
+    }
+
+    updatePathing(currentTime, dt) {
+        // Occasionally (re)plan a random short path
+        if ((!this.path || this.path.length === 0) && currentTime >= this.nextPathfindingTime) {
+            this.planRandomPath();
+            this.nextPathfindingTime = currentTime + 2000 + Math.random() * 4000; // 2-6s
+        }
+
+        if (this.path && this.path.length > 0) {
+            const nextStep = this.path[0];
+            const dx = nextStep.x - this.x;
+            const dy = nextStep.y - this.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < 2) {
+                // Snap and advance
+                this.x = nextStep.x; this.y = nextStep.y;
+                this.path.shift();
+            } else {
+                const step = this.targetSpeed * dt;
+                const nx = dx / dist, ny = dy / dist;
+                const nxPos = this.x + nx * step;
+                const nyPos = this.y + ny * step;
+                if (isWalkable(nxPos, nyPos, false, false)) {
+                    this.x = nxPos; this.y = nyPos;
+                    this.vx = nx * this.targetSpeed; this.vy = ny * this.targetSpeed;
+                } else {
+                    // hit something unexpected, replan soon
+                    this.path = [];
+                    this.nextPathfindingTime = Math.min(this.nextPathfindingTime, currentTime + 300);
+                }
+            }
+        }
+    }
+
+    planRandomPath() {
+        let targetX, targetY;
+        let attempts = 0;
+        const maxAttempts = 25;
+        while (attempts++ < maxAttempts) {
+            const randomDistance = Math.random() * MAX_ANIMAL_SEARCH_DISTANCE;
+            const randomAngle = Math.random() * Math.PI * 2;
+            targetX = this.x + randomDistance * Math.cos(randomAngle);
+            targetY = this.y + randomDistance * Math.sin(randomAngle);
+            // Clamp to world
+            const c = clampToWorldPos(targetX, targetY);
+            targetX = c.x; targetY = c.y;
+            const tType = getTileType(Math.floor(targetX / TILE_SIZE), Math.floor(targetY / TILE_SIZE));
+            if (tType !== TILE_TYPES.DEEP_WATER && tType !== TILE_TYPES.SHALLOW_WATER && tType !== TILE_TYPES.ROCK) {
+                const newPath = findPath(this.x, this.y, targetX, targetY, false);
+                if (newPath) { this.path = newPath; return; }
+            }
+        }
+        // fallback: switch to wander if no path found
+        this.behavior = 'wander';
+        this.waypoint = null;
+    }
+
+    pickLocalWaypoint(rangeTiles) {
+        const range = rangeTiles * TILE_SIZE;
+        for (let i = 0; i < 20; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const d = (0.5 + Math.random()) * range; // bias away from zero
+            let wx = this.x + Math.cos(a) * d;
+            let wy = this.y + Math.sin(a) * d;
+            wx = Math.max(0, Math.min(wx, WORLD_WIDTH * TILE_SIZE));
+            wy = Math.max(0, Math.min(wy, WORLD_HEIGHT * TILE_SIZE));
+            if (isWalkable(wx, wy, false, false)) return { x: wx, y: wy };
+        }
+        return null;
+    }
+}
+
+
+function noise(x, y) {
+    const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
+    x -= Math.floor(x); y -= Math.floor(y);
+    const u = fade(x), v = fade(y);
+    const A = p[X]+Y, B = p[X+1]+Y;
+    return lerp(v, lerp(u, grad(p[A], x, y), grad(p[B], x-1, y)),
+                  lerp(u, grad(p[A+1], x, y-1), grad(p[B+1], x-1, y-1)));
+}
+
+function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+function lerp(t, a, b) { return a + t * (b - a); }
+function grad(hash, x, y) {
+    const h = hash & 15, grad = 1 + (h & 7);
+    return ((h & 8) ? -grad : grad) * x + ((h & 4) ? -grad : grad) * y;
+}
+
+const p = new Array(512);
+for (let i = 0; i < 256; i++) p[i] = p[i + 256] = Math.floor(Math.random() * 256);
+
+function getBiome(x, y) {
+    const e = noise(x / 50, y / 50), m = noise(x / 30 + 1000, y / 30 + 1000);
+    if (e < 0.3) return TILE_TYPES.DEEP_WATER;
+    if (e < 0.4) return TILE_TYPES.SHALLOW_WATER;
+    if (e < 0.45) return TILE_TYPES.BEACH;
+    if (e > 0.8) return m < 0.4 ? TILE_TYPES.DESERT : TILE_TYPES.GRASS;
+    if (m > 0.6) return TILE_TYPES.FOREST;
+    return m < 0.3 ? TILE_TYPES.DESERT : TILE_TYPES.GRASS;
+}
+
+
+// Add this function to find the nearest shore
+function findNearestBeaches(x, y) {
+    const searchRadius = 5;
+    for (let r = 1; r <= searchRadius; r++) {
+        for (let dx = -r; dx <= r; dx++) {
+            for (let dy = -r; dy <= r; dy++) {
+                const tileX = Math.floor(x / TILE_SIZE) + dx;
+                const tileY = Math.floor(y / TILE_SIZE) + dy;
+                const tileType = getTileType(tileX, tileY);
+                if (tileType === TILE_TYPES.BEACH) {
+                    return { x: tileX * TILE_SIZE, y: tileY * TILE_SIZE };
+                }
+            }
+        }
+    }
+    return null;
+}
+
+// Add this function to find the nearest shore
+function findNearestShore(x, y) {
+    const searchRadius = 5;
+    for (let r = 1; r <= searchRadius; r++) {
+        for (let dx = -r; dx <= r; dx++) {
+            for (let dy = -r; dy <= r; dy++) {
+                const tileX = Math.floor(x / TILE_SIZE) + dx;
+                const tileY = Math.floor(y / TILE_SIZE) + dy;
+                const tileType = getTileType(tileX, tileY);
+                if (tileType === TILE_TYPES.BEACH || tileType === TILE_TYPES.GRASS || tileType === TILE_TYPES.FOREST) {
+                    return { x: tileX * TILE_SIZE, y: tileY * TILE_SIZE };
+                }
+            }
+        }
+    }
+    return null;
+}
+
+function isCoast(chunk, x, y) {
+    const landTypes = [TILE_TYPES.BEACH, TILE_TYPES.GRASS, TILE_TYPES.FOREST, TILE_TYPES.DESERT, TILE_TYPES.ROCK];
+    const waterTypes = [TILE_TYPES.DEEP_WATER, TILE_TYPES.SHALLOW_WATER];
+    const currentTile = chunk[y][x];
+    if (!landTypes.includes(currentTile)) return false;
+    for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            if (waterTypes.includes(chunk[y + dy][x + dx])) return true;
+        }
+    }
+    return false;
+}
+
+function isCoastInChunk(chunk, x, y) {
+    if (x < 1 || x >= CHUNK_SIZE - 1 || y < 1 || y >= CHUNK_SIZE - 1) {
+        // If we're on the edge of the chunk, we can't determine if it's a coast
+        // without looking at neighboring chunks. Return false for simplicity.
+        return false;
+    }
+    return isCoast(chunk, x, y);
+}
+
+
+function findNearestDeepWater(x, y) {
+    const searchRadius = 4;
+    let nearestDistance = Infinity;
+    let nearest = null;
+
+    for (let dy = -searchRadius; dy <= searchRadius; dy++) {
+        for (let dx = -searchRadius; dx <= searchRadius; dx++) {
+            const tileX = Math.floor(x / TILE_SIZE) + dx;
+            const tileY = Math.floor(y / TILE_SIZE) + dy;
+            if (getTileType(tileX, tileY) === TILE_TYPES.DEEP_WATER) {
+                const distance = dx * dx + dy * dy;
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearest = { x: (tileX + 0.5) * TILE_SIZE, y: (tileY + 0.5) * TILE_SIZE };
+                }
+            }
+        }
+    }
+
+    return nearest;
+}
+
+
+
+
+
+function generateChunk(chunkX, chunkY) {
+    const chunk = Array(CHUNK_SIZE).fill().map(() => Array(CHUNK_SIZE).fill(0));
+    for (let y = 0; y < CHUNK_SIZE; y++) {
+        for (let x = 0; x < CHUNK_SIZE; x++) {
+            const worldX = chunkX * CHUNK_SIZE + x, worldY = chunkY * CHUNK_SIZE + y;
+            const biome = getBiome(worldX, worldY);
+            chunk[y][x] = biome === TILE_TYPES.GRASS && noise(worldX * 0.5, worldY * 0.5) > 0.9 ? TILE_TYPES.ROCK : biome;
+            
+            if (Math.random() < GOLD_SPAWN_CHANCE && biome !== TILE_TYPES.DEEP_WATER && biome !== TILE_TYPES.SHALLOW_WATER) {
+                goldNuggets.push({x: worldX * TILE_SIZE, y: worldY * TILE_SIZE});
+            }
+            
+            // This is handled by moveFish's population control
+            // if (animals.length  == ANIMAL_SPAWN_MAX)
+            // {
+            //     animals[0] = animals[animals.length -1]
+            //     animals.length =  ANIMAL_SPAWN_MAX
+            // }
+
+            if (Math.random() < ANIMAL_DEATH_CHANCE && landAnimals.length > 1 )
+            {
+                //console.log("Animal died:" + animals[animals.length-1].type);
+                landAnimals.pop() // Still not great logic, but preserves original intent on land animals
+            }
+
+            if (Math.random() < ANIMAL_SPAWN_CHANCE && landAnimals.length < LAND_ANIMAL_SPAWN_MAX) {
+                if (biome === TILE_TYPES.GRASS || biome === TILE_TYPES.FOREST) {
+                    const type = ANIMAL_TYPES[Math.floor(Math.random() * (ANIMAL_TYPES.length - 2))];
+                    landAnimals.push(new LandAnimal(worldX * TILE_SIZE, worldY * TILE_SIZE, type));
+                }
+            }
+            if (Math.random() < FISH_SPAWN_CHANCE && fishFlock.length < FISH_SPAWN_MAX) {
+                if (biome === TILE_TYPES.DEEP_WATER) {
+                    fishFlock.push(new Fish(worldX * TILE_SIZE, worldY * TILE_SIZE));
+                } 
+            }
+        }
+    }
+    
+    // Place boats after generating the chunk
+    placeBoatsInChunk(chunkX, chunkY);
+    
+    // REMOVED: The animals.map() call was here, causing massive GC stalls.
+    // Fish are now spawned as Fish objects directly.
+        
+    return chunk;
+}
+
+function moveFish() {
+    return measureExecutionTime('moveFish', () => {
+        const currentTime = Date.now();
+        const pad = 200; // expand view region to pre-update
+        const viewLeft = camera.x - pad, viewTop = camera.y - pad;
+        const viewRight = camera.x + canvas.width + pad;
+        const viewBottom = camera.y + canvas.height + pad;
+        const nearRadius = 600; // also keep fish near the player active
+
+        // Determine active fish (onscreen or near player)
+        const activeFish = [];
+        for (const f of fishFlock) {
+            if ((f.x >= viewLeft && f.x <= viewRight && f.y >= viewTop && f.y <= viewBottom) ||
+                distance(player.x, player.y, f.x, f.y) <= nearRadius) {
+                activeFish.push(f);
+            }
+        }
+
+    // Build a micro spatial hash for neighbours among active fish only
+        const cellSize = ALIGNMENT_DISTANCE; // ~100px cells
+        const grid = new Map();
+        function cellKey(cx, cy) { return cx + ',' + cy; }
+        function toCell(x, y) { return { cx: Math.floor(x / cellSize), cy: Math.floor(y / cellSize) }; }
+
+        for (const f of activeFish) {
+            const c = toCell(f.x, f.y);
+            const key = cellKey(c.cx, c.cy);
+            if (!grid.has(key)) grid.set(key, []);
+            grid.get(key).push(f);
+        }
+
+        // Update active fish using local neighborhood
+        const expiredSet = new Set();
+        for (const f of activeFish) {
+            const c = toCell(f.x, f.y);
+            const neighbors = [];
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    const key = cellKey(c.cx + dx, c.cy + dy);
+                    const bucket = grid.get(key);
+                    if (bucket) neighbors.push(...bucket);
+                }
+            }
+            const hasExpired = f.update(neighbors, currentTime);
+            if (hasExpired) expiredSet.add(f);
+        }
+
+        // Also expire old fish even if inactive, cheaply
+        for (const f of fishFlock) {
+            if (currentTime - f.birthTime > f.lifespan) expiredSet.add(f);
+        }
+
+        // Remove expired fish
+        fishFlock = fishFlock.filter(f => !expiredSet.has(f));
+
+        // Spawn new fish to maintain population
+        const desiredFishCount = FISH_SPAWN_MAX;
+        const currentFishCount = fishFlock.length;
+        const fishToSpawn = Math.max(0, desiredFishCount - currentFishCount);
+
+        for (let i = 0; i < fishToSpawn; i++) {
+            const newFishX = Math.random() * WORLD_WIDTH * TILE_SIZE;
+            const newFishY = Math.random() * WORLD_HEIGHT * TILE_SIZE;
+            if (getTileType(Math.floor(newFishX / TILE_SIZE), Math.floor(newFishY / TILE_SIZE)) === TILE_TYPES.DEEP_WATER) {
+                fishFlock.push(new Fish(newFishX, newFishY));
+            }
+        }
+    });
+}
+
+
+
+
+
+
+
+function placeBoatsInChunk(chunkX, chunkY) {
+    const chunkKey = `${chunkX},${chunkY}`;
+    const chunk = chunks[chunkKey];
+    if (!chunk) return;
+
+    let boatPlaced = false;
+    for (let y = 0; y < CHUNK_SIZE; y++) {
+        for (let x = 0; x < CHUNK_SIZE; x++) {
+            const worldX = chunkX * CHUNK_SIZE + x, worldY = chunkY * CHUNK_SIZE + y;
+            if (isCoastInChunk(chunk, x, y) && !boatPlaced) {
+                boats.push({x: worldX * TILE_SIZE, y: worldY * TILE_SIZE});
+                boatPlaced = true;
+            }
+        }
+    }
+
+    // If no coast was found, place a boat on any land tile
+    if (!boatPlaced) {
+        for (let y = 0; y < CHUNK_SIZE; y++) {
+            for (let x = 0; x < CHUNK_SIZE; x++) {
+                const worldX = chunkX * CHUNK_SIZE + x, worldY = chunkY * CHUNK_SIZE + y;
+                const tileType = chunk[y][x];
+                if (tileType === TILE_TYPES.GRASS || tileType === TILE_TYPES.FOREST || tileType === TILE_TYPES.BEACH) {
+                    boats.push({x: worldX * TILE_SIZE, y: worldY * TILE_SIZE});
+                    boatPlaced = true;
+                    break;
+                }
+            }
+            if (boatPlaced) break;
+        }
+    }
+}
+
+function isAnimalTypeValid(animalType) {
+  return ANIMAL_TYPES.includes(animalType);
+}
+
+async function loadNewArea() {
+    loadingIndicator.style.display = 'block';
+
+    const visibleChunksX = Math.ceil(canvas.width / (CHUNK_SIZE * TILE_SIZE)) + 1;
+    const visibleChunksY = Math.ceil(canvas.height / (CHUNK_SIZE * TILE_SIZE)) + 1;
+    const centerChunkX = Math.floor(player.x / (CHUNK_SIZE * TILE_SIZE));
+    const centerChunkY = Math.floor(player.y / (CHUNK_SIZE * TILE_SIZE));
+
+    for (let dy = -Math.floor(visibleChunksY / 2); dy <= Math.floor(visibleChunksY / 2); dy++) {
+        for (let dx = -Math.floor(visibleChunksX / 2); dx <= Math.floor(visibleChunksX / 2); dx++) {
+            const chunkX = centerChunkX + dx;
+            const chunkY = centerChunkY + dy;
+            const chunkKey = `${chunkX},${chunkY}`;
+            
+            if (!chunks[chunkKey]) {
+                chunks[chunkKey] = generateChunk(chunkX, chunkY);
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+        }
+    }
+
+    loadingIndicator.style.display = 'none';
+}
+
+function drawWorld() {
+    return measureExecutionTime('drawWorld', () => {
+        const startX = Math.floor(camera.x / TILE_SIZE);
+        const startY = Math.floor(camera.y / TILE_SIZE);
+        const endX = startX + Math.ceil(canvas.width / TILE_SIZE) + 1;
+        const endY = startY + Math.ceil(canvas.height / TILE_SIZE) + 1;
+        
+        for (let y = startY; y < endY; y++) {
+            for (let x = startX; x < endX; x++) {
+                const tileX = x * TILE_SIZE - camera.x;
+                const tileY = y * TILE_SIZE - camera.y;
+                const tileType = getTileType(x, y);
+        
+                ctx.fillStyle = getTileColor(tileType);
+                ctx.fillRect(tileX, tileY, TILE_SIZE, TILE_SIZE);
+        
+                if (tileType === TILE_TYPES.FOREST) {
+                    ctx.beginPath();
+                    ctx.moveTo(tileX + TILE_SIZE / 2, tileY);
+                    ctx.lineTo(tileX, tileY + TILE_SIZE);
+                    ctx.lineTo(tileX + TILE_SIZE, tileY + TILE_SIZE);
+                    ctx.fillStyle = '#006400';
+                    ctx.fill();
+                } else if (tileType === TILE_TYPES.ROCK) {
+                    ctx.beginPath();
+                    ctx.arc(tileX + TILE_SIZE / 2, tileY + TILE_SIZE / 2, TILE_SIZE / 3, 0, 2 * Math.PI);
+                    ctx.fillStyle = '#A9A9A9';
+                    ctx.fill();
+                }
+            }
+        }
+
+        boats.forEach(boat => {
+            const boatX = boat.x - camera.x;
+            const boatY = boat.y - camera.y;
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(boatX, boatY, TILE_SIZE, TILE_SIZE / 2);
+            ctx.beginPath();
+            ctx.moveTo(boatX, boatY + TILE_SIZE / 2);
+            ctx.lineTo(boatX + TILE_SIZE / 2, boatY + TILE_SIZE);
+            ctx.lineTo(boatX + TILE_SIZE, boatY + TILE_SIZE / 2);
+            ctx.fill();
+        });
+
+        goldNuggets.forEach(gold => {
+            const goldX = gold.x - camera.x;
+            const goldY = gold.y - camera.y;
+            ctx.fillStyle = 'gold';
+            ctx.beginPath();
+            ctx.arc(goldX + TILE_SIZE / 2, goldY + TILE_SIZE / 2, TILE_SIZE / 4, 0, 2 * Math.PI);
+            ctx.fill();
+        });
+
+        ctx.font = `${TILE_SIZE}px Arial`;
+        
+        // Draw Fish (cull offscreen for perf)
+        const vw = canvas.width, vh = canvas.height;
+        fishFlock.forEach(animal => {
+            const animalX = animal.x - camera.x;
+            const animalY = animal.y - camera.y;
+            if (animalX >= -TILE_SIZE && animalX <= vw + TILE_SIZE && animalY >= -TILE_SIZE && animalY <= vh + TILE_SIZE) {
+                ctx.fillText('\u{1F41F}', animalX, animalY + TILE_SIZE);
+            }
+        });
+
+        // Draw Land Animals
+        landAnimals.forEach(animal => {
+            const animalX = animal.x - camera.x;
+            const animalY = animal.y - camera.y;
+            
+            // FIXME
+            if (!(isAnimalTypeValid(animal.type)))  
+                {
+                animal.type=ANIMAL_TYPES[Math.floor(Math.random() * (ANIMAL_TYPES.length - 2))];
+                
+                //console.log("Animal born: "+animal.type);
+                }
+            ctx.fillText(animal.type, animalX, animalY + TILE_SIZE);
+        });
+
+        if (path && path.length > 0) {
+            ctx.beginPath();
+            ctx.moveTo(path[0].x - camera.x, path[0].y - camera.y);
+            for (let i = 1; i < path.length; i++) {
+                ctx.lineTo(path[i].x - camera.x, path[i].y - camera.y);
+            }
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+    });
+}
+
+
+function getTileColor(tileType) {
+    const colors = ['#0077BE', '#89CFF0', '#F4A460', '#7CFC00', '#228B22', '#DEB887', '#808080'];
+    return colors[tileType] || '#000000';
+}
+
+
+function drawPlayer() {
+    return measureExecutionTime('drawPlayer', () => {
+            ctx.save(); // Save the current canvas state
+            if (player.direction === 'right') {
+                ctx.scale(-1, 1); // Flip horizontally
+                ctx.translate(-canvas.width, 0); // Adjust the canvas origin
+                ctx.font = `${player.size * 2}px Arial`;
+                //ctx.fillText(player.currentEmoji, canvas.width - (player.x - camera.x) + player.size / 2, player.y - camera.y + player.size / 2);
+                ctx.fillText(player.currentEmoji, canvas.width - (player.x - camera.x), player.y - camera.y + player.size / 2);
+            } else {
+                ctx.font = `${player.size * 2}px Arial`;
+                ctx.fillText(player.currentEmoji, player.x - camera.x + player.size / 2, player.y - camera.y + player.size / 2);
+            }
+            ctx.restore(); // Restore the canvas state
+    });
+}
+
+function updatePlayerEmoji() {
+    const currentTime = Date.now();
+    if (currentTime - lastAnimationTime > ANIMATION_INTERVAL) {
+        lastAnimationTime = currentTime;
+        if (player.inBoat) {
+            player.currentEmoji = PLAYER_EMOJIS.ROWING;
+        } else if (player.isMoving) {
+            playerAnimationFrame = (playerAnimationFrame + 1) % 3;
+            switch (playerAnimationFrame) {
+                case 0:
+                    player.currentEmoji = PLAYER_EMOJIS.WALKING;
+                    break;
+                case 1:
+                    player.currentEmoji = PLAYER_EMOJIS.STANDING;
+                    break;
+                case 2:
+                    player.currentEmoji = PLAYER_EMOJIS.RUNNING;
+                    break;
+            }
+        } else {
+            player.currentEmoji = PLAYER_EMOJIS.STANDING;
+        }
+    }
+}
+
+function updateUI() {
+    return measureExecutionTime('updateUI', () => {
+        const tileX = Math.floor(player.x / TILE_SIZE);
+        const tileY = Math.floor(player.y / TILE_SIZE);
+        xPosElement.textContent = tileX;
+        yPosElement.textContent = tileY;
+        const tileType = getTileType(tileX, tileY);
+        biomeElement.textContent = getBiomeName(tileType);
+        if ( player.inBoat ) {statusElement.textContent = 'In Boat' };
+        statusElement.textContent = player.inBoat ? 'In Boat' : 'On Foot';
+        goldCountElement.textContent = player.gold;
+    });
+}
+
+function getBiomeName(tileType) {
+    const biomes = ['Deep Water', 'Shallow Water', 'Beach', 'Grassland', 'Forest', 'Desert', 'Rocky'];
+    return biomes[tileType] || 'Unknown';
+}
+
+function getTileType(x, y) {
+    const chunkX = Math.floor(x / CHUNK_SIZE);
+    const chunkY = Math.floor(y / CHUNK_SIZE);
+    const chunkKey = `${chunkX},${chunkY}`;
+    
+    if (!chunks[chunkKey]) {
+        chunks[chunkKey] = generateChunk(chunkX, chunkY);
+        placeBoatsInChunk(chunkX, chunkY);
+    }
+
+    const localX = ((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    const localY = ((y % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    return chunks[chunkKey][localY][localX];
+}
+
+function drawMinimap() {
+    return measureExecutionTime('drawMinimap', () => {
+            minimapCtx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
+            
+            const minimapTileSize = TILE_SIZE * MINIMAP_SCALE;
+            const visibleTilesX = Math.ceil(minimapCanvas.width / minimapTileSize);
+            const visibleTilesY = Math.ceil(minimapCanvas.height / minimapTileSize);
+            
+            const centerX = Math.floor(minimapCanvas.width / (2 * minimapTileSize));
+            const centerY = Math.floor(minimapCanvas.height / (2 * minimapTileSize));
+            
+            const startX = Math.floor(player.x / TILE_SIZE) - centerX;
+            const startY = Math.floor(player.y / TILE_SIZE) - centerY;
+            
+            for (let y = 0; y < visibleTilesY; y++) {
+                for (let x = 0; x < visibleTilesX; x++) {
+                    const worldX = startX + x;
+                    const worldY = startY + y;
+                    const tileType = getTileType(worldX, worldY);
+                    minimapCtx.fillStyle = getTileColor(tileType);
+                    minimapCtx.fillRect(x * minimapTileSize, y * minimapTileSize, minimapTileSize, minimapTileSize);
+                }
+            }
+        
+        minimapCtx.fillStyle = 'red';
+        minimapCtx.fillRect(centerX * minimapTileSize, centerY * minimapTileSize, minimapTileSize, minimapTileSize);
+        
+        minimapCtx.fillStyle = 'brown';
+        boats.forEach(boat => {
+            const boatMinimapX = (boat.x / TILE_SIZE - startX) * minimapTileSize;
+            const boatMinimapY = (boat.y / TILE_SIZE - startY) * minimapTileSize;
+            if (boatMinimapX >= 0 && boatMinimapX < minimapCanvas.width && boatMinimapY >= 0 && boatMinimapY < minimapCanvas.height) {
+                minimapCtx.fillRect(boatMinimapX, boatMinimapY, minimapTileSize, minimapTileSize);
+            }
+        });
+    
+        minimapCtx.fillStyle = 'gold';
+        goldNuggets.forEach(gold => {
+            const goldMinimapX = (gold.x / TILE_SIZE - startX) * minimapTileSize;
+            const goldMinimapY = (gold.y / TILE_SIZE - startY) * minimapTileSize;
+            if (goldMinimapX >= 0 && goldMinimapX < minimapCanvas.width && goldMinimapY >= 0 && goldMinimapY < minimapCanvas.height) {
+                minimapCtx.fillRect(goldMinimapX, goldMinimapY, minimapTileSize, minimapTileSize);
+            }
+        });
+    });
+}
+
+function isWalkable(x, y, inBoat, isFish) {
+    const tileType = getTileType(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE));
+    if (isFish !== undefined) {  // For animals
+        return isFish ? tileType === TILE_TYPES.DEEP_WATER : (tileType !== TILE_TYPES.DEEP_WATER && tileType !== TILE_TYPES.SHALLOW_WATER && tileType !== TILE_TYPES.ROCK);
+    }
+    // For player
+    if (inBoat) {
+        return tileType === TILE_TYPES.DEEP_WATER || tileType === TILE_TYPES.SHALLOW_WATER || tileType === TILE_TYPES.BEACH;
+    } else {
+        return tileType !== TILE_TYPES.DEEP_WATER && tileType !== TILE_TYPES.SHALLOW_WATER && tileType !== TILE_TYPES.ROCK;
+    }
+}
+
+// Common helpers (shared by land animals and fish)
+function clampToWorldPos(x, y) {
+    const maxX = WORLD_WIDTH * TILE_SIZE;
+    const maxY = WORLD_HEIGHT * TILE_SIZE;
+    return {
+        x: Math.max(0, Math.min(x, maxX)),
+        y: Math.max(0, Math.min(y, maxY))
+    };
+}
+
+function easeScalar(current, target, dt, ratePerSecond) {
+    const t = Math.min(1, Math.max(0, dt * ratePerSecond));
+    return current + (target - current) * t;
+}
+
+function isWalkableLand(x, y) {
+    return isWalkable(x, y, false, false);
+}
+
+function pickLocalWaypoint(startX, startY, rangeTiles, isWalkableFn, maxAttempts = 20) {
+    const range = rangeTiles * TILE_SIZE;
+    for (let i = 0; i < maxAttempts; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const d = (0.5 + Math.random()) * range; // bias away from zero
+        let wx = startX + Math.cos(a) * d;
+        let wy = startY + Math.sin(a) * d;
+        const c = clampToWorldPos(wx, wy);
+        wx = c.x; wy = c.y;
+        if (isWalkableFn(wx, wy)) return { x: wx, y: wy };
+    }
+    return null;
+}
+
+function distance(x1, y1, x2, y2) {
+    const dx = x2 - x1, dy = y2 - y1;
+    return Math.hypot(dx, dy);
+}
+
+function direction(x1, y1, x2, y2) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const d = Math.hypot(dx, dy);
+    if (d === 0) return { x: 0, y: 0, d: 0 };
+    return { x: dx / d, y: dy / d, d };
+}
+
+
+function findPath(startX, startY, endX, endY, isFish, maxSearchDistance = MAX_SEARCH_DISTANCE) {
+    const openSet = new BinaryHeap(node => node.f);
+    const closedSet = new Set();
+    const start = {x: startX, y: startY, f: 0, g: 0, h: 0, parent: null, inBoat: isFish === undefined ? player.inBoat : undefined};
+    const end = {x: endX, y: endY};
+
+    openSet.push(start);
+
+    while (openSet.size() > 0) {
+        const current = openSet.pop();
+
+        // Check if we've exceeded the maximum search distance
+        if (Math.abs(current.x - startX) > maxSearchDistance || Math.abs(current.y - startY) > maxSearchDistance) {
+            // console.log("Max search distance exceeded");
+            return null;
+        }
+
+        if (Math.abs(current.x - end.x) < TILE_SIZE && Math.abs(current.y - end.y) < TILE_SIZE) {
+            let path = [];
+            let temp = current;
+            while (temp) {
+                path.push({x: temp.x, y: temp.y, inBoat: temp.inBoat});
+                temp = temp.parent;
+            }
+            return path.reverse();
+        }
+
+        closedSet.add(`${current.x},${current.y},${current.inBoat}`);
+
+        const neighbors = [
+            {dx: -TILE_SIZE, dy: 0},
+            {dx: TILE_SIZE, dy: 0},
+            {dx: 0, dy: -TILE_SIZE},
+            {dx: 0, dy: TILE_SIZE},
+            {dx: -TILE_SIZE, dy: -TILE_SIZE},
+            {dx: -TILE_SIZE, dy: TILE_SIZE},
+            {dx: TILE_SIZE, dy: -TILE_SIZE},
+            {dx: TILE_SIZE, dy: TILE_SIZE}
+        ];
+
+        for (const {dx, dy} of neighbors) {
+            const neighborX = current.x + dx;
+            const neighborY = current.y + dy;
+            
+            // Check if neighbor is within max search distance
+            if (Math.abs(neighborX - startX) > maxSearchDistance || Math.abs(neighborY - startY) > maxSearchDistance) {
+                continue;
+            }
+
+            const neighborTileType = getTileType(Math.floor(neighborX / TILE_SIZE), Math.floor(neighborY / TILE_SIZE));
+
+            let inBoat = current.inBoat;
+            let canMove = isWalkable(neighborX, neighborY, inBoat, isFish);
+
+            if (!canMove && !isFish && !inBoat && (neighborTileType === TILE_TYPES.DEEP_WATER || neighborTileType === TILE_TYPES.SHALLOW_WATER)) {
+                const nearbyBoat = boats.find(boat => 
+                    Math.abs(boat.x - current.x) <= TILE_SIZE && Math.abs(boat.y - current.y) <= TILE_SIZE
+                );
+                if (nearbyBoat) {
+                    inBoat = true;
+                    canMove = true;
+                }
+            } else if (inBoat && neighborTileType !== TILE_TYPES.DEEP_WATER && neighborTileType !== TILE_TYPES.SHALLOW_WATER) {
+                inBoat = false;
+            }
+
+            if (!canMove) continue;
+
+            const neighbor = {
+                x: neighborX,
+                y: neighborY,
+                g: current.g + Math.sqrt(dx * dx + dy * dy), // Use actual distance for diagonal movement
+                h: Math.abs(neighborX - end.x) + Math.abs(neighborY - end.y),
+                parent: current,
+                inBoat: inBoat
+            };
+            neighbor.f = neighbor.g + neighbor.h;
+
+            const neighborKey = `${neighbor.x},${neighbor.y},${neighbor.inBoat}`;
+            if (closedSet.has(neighborKey)) continue;
+
+            if (!openSet.contains(neighbor)) {
+                openSet.push(neighbor);
+            } else if (neighbor.g < openSet.getNode(neighbor).g) {
+                openSet.remove(neighbor);
+                openSet.push(neighbor);
+            }
+        }
+    }
+
+    // console.log("No path found within max search distance");
+    return null;
+}
+
+// Binary Heap implementation for more efficient open set management
+class BinaryHeap {
+    constructor(scoreFunction) {
+        this.content = [];
+        this.scoreFunction = scoreFunction;
+    }
+
+    push(element) {
+        this.content.push(element);
+        this.bubbleUp(this.content.length - 1);
+    }
+
+    pop() {
+        const result = this.content[0];
+        const end = this.content.pop();
+        if (this.content.length > 0) {
+            this.content[0] = end;
+            this.sinkDown(0);
+        }
+        return result;
+    }
+
+    remove(node) {
+        const i = this.content.indexOf(node);
+        const end = this.content.pop();
+        if (i !== this.content.length - 1) {
+            this.content[i] = end;
+            if (this.scoreFunction(end) < this.scoreFunction(node)) {
+                this.bubbleUp(i);
+            } else {
+                this.sinkDown(i);
+            }
+        }
+    }
+
+    size() {
+        return this.content.length;
+    }
+
+    contains(node) {
+        return this.content.some(el => el.x === node.x && el.y === node.y && el.inBoat === node.inBoat);
+    }
+
+    getNode(node) {
+        return this.content.find(el => el.x === node.x && el.y === node.y && el.inBoat === node.inBoat);
+    }
+
+    bubbleUp(n) {
+        const element = this.content[n];
+        while (n > 0) {
+            const parentN = ((n + 1) >> 1) - 1;
+            const parent = this.content[parentN];
+            if (this.scoreFunction(element) >= this.scoreFunction(parent)) break;
+            this.content[parentN] = element;
+            this.content[n] = parent;
+            n = parentN;
+        }
+    }
+
+    sinkDown(n) {
+        const length = this.content.length;
+        const element = this.content[n];
+        const elemScore = this.scoreFunction(element);
+
+        while (true) {
+            const child2N = (n + 1) << 1;
+            const child1N = child2N - 1;
+            let swap = null;
+            let child1Score;
+            if (child1N < length) {
+                const child1 = this.content[child1N];
+                child1Score = this.scoreFunction(child1);
+                if (child1Score < elemScore) swap = child1N;
+            }
+            if (child2N < length) {
+                const child2 = this.content[child2N];
+                const child2Score = this.scoreFunction(child2);
+                if (child2Score < (swap === null ? elemScore : child1Score)) swap = child2N;
+            }
+            if (swap === null) break;
+            this.content[n] = this.content[swap];
+            this.content[swap] = element;
+            n = swap;
+        }
+    }
+}
+
+
+async function transportToNearestBeach() {
+    const searchRadius = 20;
+    let nearestBeach = null;
+    let minDistance = Infinity;
+
+    for (let dy = -searchRadius; dy <= searchRadius; dy++) {
+        for (let dx = -searchRadius; dx <= searchRadius; dx++) {
+            const x = Math.floor(player.x / TILE_SIZE) + dx;
+            const y = Math.floor(player.y / TILE_SIZE) + dy;
+            if (getTileType(x, y) === TILE_TYPES.BEACH) {
+                const distance = dx * dx + dy * dy;
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    nearestBeach = {x, y};
+                }
+            }
+        }
+    }
+
+    if (nearestBeach) {
+        player.x = (nearestBeach.x + 0.5) * TILE_SIZE;
+        player.y = (nearestBeach.y + 0.5) * TILE_SIZE;
+        player.inBoat = false;
+        statusElement.textContent = 'Transported to Beach';
+        await loadNewArea();
+    } else {
+        console.log('No nearby beach found');
+    }
+}
+
+function dismountFromBoat() {
+    player.inBoat = false;
+    const nearestBeach = findNearestBeaches(player.x, player.y);
+    if (nearestBeach) {
+        boats.push({x: nearestBeach.x, y: nearestBeach.y});
+    } //else {
+      //  boats.push({x: player.x, y: player.y}); // Fallback if no shore is found
+    //}
+    statusElement.textContent = 'Dismounted from Boat';
+}
+
+function collectGold() {
+    for (let i = goldNuggets.length - 1; i >= 0; i--) {
+        const dx = goldNuggets[i].x - player.x;
+        const dy = goldNuggets[i].y - player.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance <= GOLD_PICKUP_RADIUS) {
+            player.gold++;
+            
+            // Create an animated emoji
+            animatedEmojis.push({
+                x: goldNuggets[i].x,
+                y: goldNuggets[i].y,
+                vy: -2,  // Vertical velocity (moving upwards)
+                opacity: 1,
+                createdAt: Date.now()
+            });
+            
+            goldNuggets.splice(i, 1);
+            statusElement.textContent = "Found gold";
+            updateUI();
+        }
+    }
+}
+
+function updateAndRenderAnimatedEmojis() {
+    const currentTime = Date.now();
+    
+    for (let i = animatedEmojis.length - 1; i >= 0; i--) {
+        const emoji = animatedEmojis[i];
+        
+        // Update position and opacity
+        emoji.y += emoji.vy;
+        emoji.opacity = 1 - (currentTime - emoji.createdAt) / 1000;  // Fade out over 1 second
+        
+        // Remove if fully faded
+        if (emoji.opacity <= 0) {
+            animatedEmojis.splice(i, 1);
+            continue;
+        }
+        
+        // Render emoji
+        const screenX = emoji.x - camera.x;
+        const screenY = emoji.y - camera.y;
+        
+        ctx.font = `${TILE_SIZE}px Arial`;
+        //ctx.textAlign = 'center';
+        //ctx.textBaseline = 'middle';
+        ctx.globalAlpha = emoji.opacity;
+        ctx.fillText('\u{1FA99}', screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2);
+        ctx.globalAlpha = 1;  // Reset global alpha
+    }
+}
+
+function moveAnimals() {
+    return measureExecutionTime('moveAnimals', () => {
+        const currentTime = Date.now();
+
+        landAnimals.forEach(animal => {
+            const dx = animal.x - player.x;
+            const dy = animal.y - player.y;
+            const distanceToPlayer = Math.sqrt(dx * dx + dy * dy);
+
+            if (distanceToPlayer <= MAX_ANIMAL_SEARCH_DISTANCE) {
+                // Give land animals a bit more attention: they update each frame when close
+                if (typeof animal.update === 'function') {
+                    animal.update(currentTime);
+                }
+            } else {
+                // When far, keep them cheap: clear path and let behavior reset later
+                if (animal.path && animal.path.length > 0) animal.path = [];
+            }
+        });
+    });
+}
+
+function generateRandomPath() {
+    const maxDistance = 200 * TILE_SIZE; // Maximum distance for random path
+    let targetX, targetY;
+    let attempts = 0;
+    const maxAttempts = 20;
+    
+    // Function to calculate distance between two points
+    const distance = (x1, y1, x2, y2) => Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+    
+    // Find nearby POIs (animals and gold)
+    const nearbyPOIs = [...landAnimals, ...fishFlock, ...goldNuggets].filter(poi => 
+        distance(player.x, player.y, poi.x, poi.y) <= maxDistance
+    );
+    
+    do {
+    // Prioritise POIs if available
+        if (nearbyPOIs.length > 0 && Math.random() < 0.3) { // 30% chance to target a POI
+            const targetPOI = nearbyPOIs[Math.floor(Math.random() * nearbyPOIs.length)];
+            targetX = targetPOI.x;
+            targetY = targetPOI.y;
+        } else {
+            // Generate random target if no POI is chosen
+            const angle = Math.random() * 2 * Math.PI;
+            const randomDistance = ((Math.random() * 2) - 1) * maxDistance ;
+            targetX = player.x + randomDistance * Math.cos(angle);
+            targetY = player.y + randomDistance * Math.sin(angle);
+        }
+        
+        // Ensure the target is within the world bounds
+        //targetX = Math.max(0, Math.min(targetX, WORLD_WIDTH * 4 * TILE_SIZE ));
+        //targetY = Math.max(0, Math.min(targetY, WORLD_HEIGHT * 4 * TILE_SIZE  ));
+        
+        // Check if the target is walkable
+        const targetTileX = Math.floor(targetX / TILE_SIZE);
+        const targetTileY = Math.floor(targetY / TILE_SIZE);
+        const isWalkableTarget = isWalkable(targetX, targetY, player.inBoat);
+        
+        // Only try to find a path if the target is walkable
+        if (isWalkableTarget) {
+            path = findPath(player.x, player.y, targetX, targetY, undefined, MAX_SEARCH_DISTANCE);
+        } else {
+            path = null;
+        }
+        
+        attempts++;
+    } while (!path && attempts < maxAttempts);
+    
+    if (path) {
+        target = {x: targetX, y: targetY};
+        console.log('Generated path to POI or random location at '+ target.x+ ', ' +target.y);
+        
+        // Determine what kind of target we've found
+        const targetType = landAnimals.some(animal => animal.x === targetX && animal.y === targetY) ? 'animal' :
+                            goldNuggets.some(gold => gold.x === targetX && gold.y === targetY) ? 'gold' : 'random';
+        
+        // Update status message
+        switch(targetType) {
+            case 'animal':
+                planElement.textContent = 'Moving towards an animal';
+                break;
+            case 'gold':
+                planElement.textContent = 'Moving towards gold';
+                break;
+            default:
+                planElement.textContent = 'Exploring randomly';
+        }
+    } else {
+        console.log('Failed to generate a valid path');
+        statusElement.textContent = 'Unable to find a valid path';
+    }
+}
+async function movePlayer() {
+    return await measureExecutionTime('movePlayer', async () => {
+        if (path && path.length > 0) {
+            player.isMoving = true;
+            const nextStep = path.shift();
+            const prevInBoat = player.inBoat;
+            player.x = nextStep.x;
+            player.y = nextStep.y;
+            player.inBoat = nextStep.inBoat;
+            
+            if (nextStep.inBoat) {
+                 boats.pop({x: player.x, y: player.y});
+            }
+
+            camera.x = player.x - canvas.width / 2;
+            camera.y = player.y - canvas.height / 2;
+
+            const currentTileType = getTileType(Math.floor(player.x / TILE_SIZE), Math.floor(player.y / TILE_SIZE));
+
+            if (!player.inBoat && (currentTileType === TILE_TYPES.DEEP_WATER || currentTileType === TILE_TYPES.SHALLOW_WATER)) {
+                await transportToNearestBeach();
+            }
+
+            if (prevInBoat && !player.inBoat) {
+                dismountFromBoat();
+            }
+
+            if (path.length === 0) {
+                player.isMoving = false;
+                target = null;
+                lastPathCompletionTime = Date.now(); // Record the time when the path is completed
+            }
+
+            collectGold();
+
+            const playerChunkX = Math.floor(player.x / (CHUNK_SIZE * TILE_SIZE));
+            const playerChunkY = Math.floor(player.y / (CHUNK_SIZE * TILE_SIZE));
+            if (!chunks[`${playerChunkX},${playerChunkY}`]) {
+                await loadNewArea();
+            }
+        } else {
+            player.isMoving = false;
+            
+            // Check if it's time to generate a random path
+            if (Date.now() - lastPathCompletionTime > AUTO_PATH_DELAY && !target) {
+                generateRandomPath();
+            }
+        }
+
+        // Update player emoji based on state
+        if (player.inBoat) {
+            player.currentEmoji = PLAYER_EMOJIS.ROWING;
+        } else if (player.isMoving) {
+            // This will be handled in updatePlayerEmoji function for animation
+        } else {
+            player.currentEmoji = PLAYER_EMOJIS.STANDING;
+        }
+    });
+}
+
+async function gameLoop() {
+    const frameStartTime = performance.now();
+    const frameTime = frameStartTime - lastFrameTime;
+    lastFrameTime = frameStartTime;
+    frameCount++;
+
+    totalFrameTime += frameTime;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    measureExecutionTime('updatePlayerEmoji', updatePlayerEmoji);
+    measureExecutionTime('drawWorld', drawWorld);
+    updateAndRenderAnimatedEmojis()
+    measureExecutionTime('drawPlayer', drawPlayer);
+    measureExecutionTime('updateUI', updateUI);
+    measureExecutionTime('drawMinimap', drawMinimap);
+    await measureExecutionTime('movePlayer', movePlayer);
+    measureExecutionTime('moveFish', moveFish);    
+    measureExecutionTime('moveAnimals', moveAnimals);
+    
+    drawDebugInfo(frameTime);
+
+    requestAnimationFrame(gameLoop);
+}
+
+
+function drawDebugInfo(frameTime) {
+    ctx.font = '12px Arial';
+    ctx.fillStyle = 'white';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+
+    let yOffset = 20;
+    const lineHeight = 15;
+
+    ctx.fillText(`Frame Time: ${frameTime.toFixed(2)}ms`, 10, canvas.height - yOffset);
+    yOffset += lineHeight;
+
+    if (frameCount >= 60) {
+        const avgFrameTime = totalFrameTime / frameCount;
+        const percent = (avgFrameTime / 16.67) * 100; // Assuming 60 FPS (1000ms/60 â‰ˆ 16.67ms per frame)
+        ctx.fillText(`Avg Frame Time: ${avgFrameTime.toFixed(2)}ms (${percent.toFixed(2)}% of 16.67ms)`, 10, canvas.height - yOffset);
+        yOffset += lineHeight;
+
+        // Reset total frame time and frame count every 60 frames
+        totalFrameTime = 0;
+        frameCount = 0;
+    }
+
+    for (const [methodName, times] of Object.entries(methodTimes)) {
+        if (times.length > 0) {
+            const avgTime = times.reduce((a, b) => a + b, 0) / times.length;
+            const percent = (avgTime / frameTime) * 100;
+            ctx.fillText(`${methodName}: ${avgTime.toFixed(2)}ms (${percent.toFixed(2)}%)`, 10, canvas.height - yOffset);
+            yOffset += lineHeight;
+        }
+    }
+}
+
+function measureExecutionTime(methodName, method) {
+    const start = performance.now();
+    method();
+    const end = performance.now();
+
+    if (!methodTimes[methodName]) {
+        methodTimes[methodName] = [];
+    }
+    methodTimes[methodName].push(end - start);
+
+    // Keep only the last 60 frames of data for each method
+    if (methodTimes[methodName].length > 60) {
+        methodTimes[methodName].shift();
+    }
+}
+
+async function initializeGame() {
+    
+    frameTimeSum = 0;
+    frameCount = 0;
+    lastFrameTime = performance.now();
+    animalPathTimeSum = 0;
+    
+    loadingIndicator.style.display = 'block';
+
+    let startX, startY;
+    do {
+        startX = Math.floor(Math.random() * WORLD_WIDTH);
+        startY = Math.floor(Math.random() * WORLD_HEIGHT);
+    } while (getTileType(startX, startY) === TILE_TYPES.DEEP_WATER || getTileType(startX, startY) === TILE_TYPES.SHALLOW_WATER);
+
+    player.x = startX * TILE_SIZE;
+    player.y = startY * TILE_SIZE;
+    camera.x = player.x - canvas.width / 2;
+    camera.y = player.y - canvas.height / 2;
+
+    await loadNewArea();
+
+    loadingIndicator.style.display = 'none';
+    gameLoop();
+}
+
+
+canvas.addEventListener('click', async (event) => {
+    const clickX = event.clientX + camera.x - TILE_SIZE;
+    const clickY = event.clientY + camera.y - TILE_SIZE;
+
+    if (clickX > player.x) {
+        player.direction = 'right';
+    } else {
+        player.direction = 'left';
+    }
+
+    target = {x: clickX, y: clickY};
+    path = findPath(player.x, player.y, clickX, clickY, undefined, MAX_SEARCH_DISTANCE);
+
+    if (!path) {
+        console.log('No path found or destination too far');
+        target = null;
+        statusElement.textContent = 'Destination unreachable or too far';
+    } else {
+        lastPathCompletionTime = Date.now(); // Reset the timer when the user clicks
+    }
+});
+
+// Modify the pathfinding form submission handler to reset the timer
+pathfindingForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const targetX = parseInt(targetXInput.value) * TILE_SIZE;
+    const targetY = parseInt(targetYInput.value) * TILE_SIZE;
+
+    target = {x: targetX, y: targetY};
+    path = findPath(player.x, player.y, targetX, targetY, undefined, MAX_SEARCH_DISTANCE);
+
+    if (!path) {
+        console.log('No path found or destination too far');
+        target = null;
+        statusElement.textContent = 'Destination unreachable or too far';
+    } else {
+        lastPathCompletionTime = Date.now(); // Reset the timer when a new path is set
+    }
+
+    pathfindingDialog.style.display = 'none';
+});
+
+window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+});
+
+initializeGame();
+</script>
+</body>
+</html>
