@@ -16,13 +16,13 @@ A tiny browser-based world rendered on a canvas with procedurally generated biom
 - **Minimap**: Shows nearby terrain, boats, and gold (click to navigate)
 - **Debug mode**: Press `D` to toggle visual debugging showing player position, tile centers, and boundaries
 - **NPCs**: 
-  - Categorized into royal, common, and undead types
+  - Categorised into royal, common, and undead types
   - Unique King and Queen
   - Undead village with zombies and vampires
   - Speech bubbles with character-specific dialogue
 - **Gold collection**: Gold nuggets spawn on land with floating emoji feedback on collection
 - **Fish**: Efficient flocking with staggered updates, local neighbour lookups, and off-screen culling
-- **Land animals**: Centralized behaviour with smooth speed changes, low-cost wandering, and budget-limited pathfinding
+- **Land animals**: Centralised behaviour with smooth speed changes, low-cost wandering, and budget-limited pathfinding
 - **Safe spawn**: Player spawns in walkable areas using concentric circle search
 
 ## How to run
