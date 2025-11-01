@@ -4,15 +4,19 @@ A tiny browser-based world rendered on a canvas with procedurally generated biom
 
 ## Features
 
-- **Procedural world generation**: Deep/shallow water, beaches, grassland, forest, desert, rocks, and snow-capped mountains using 3D Perlin noise for terrain height.
+- **Procedural world generation**: Infinite chunk-based world with deep/shallow water, beaches, grassland, forest, desert, small rocks (impassable), climbable mountain rocks, and snow using 3D Perlin noise for terrain height.
 - **Settlements**: Procedurally placed cities, towns, and villages with unique NPCs including royalty and an undead village.
 - **Player movement**: 
   - Smooth lerp-based movement with configurable speed
   - Click-to-move with A* pathfinding
   - Automatic boat embark/disembark
   - Swimming ability (4x slower than walking, used as fallback when no boat available)
+  - Mountain climbing (25x slower on climbable mountain rocks)
+  - Snow skiing when descending (2x slower)
+  - Snowboarding when ascending snow (20x slower)
   - Diagonal movement with corner-cutting prevention
-- **World map**: Press `W` to view entire explored world, click to set destinations
+  - Directional emoji flipping (emojis face correct direction based on movement)
+- **World map**: Press `W` to view entire explored world with dynamic bounds, click to navigate anywhere
 - **Minimap**: Shows nearby terrain, boats, and gold (click to navigate)
 - **Debug mode**: Press `D` to toggle visual debugging showing player position, tile centers, and boundaries
 - **NPCs**: 
@@ -34,15 +38,18 @@ A tiny browser-based world rendered on a canvas with procedurally generated biom
 ## Controls
 
 - **Left Click**: Set destination (works on main map, minimap, and world map)
-- **W**: Toggle world map overlay (pauses game)
+- **W**: Toggle world map overlay (pauses game, shows all explored chunks)
 - **D**: Toggle debug mode (shows position indicators)
 - Player automatically boards boats when needed and disembarks at beaches
 - Swimming is automatic when crossing water without a boat
+- Climbing, skiing, and snowboarding are automatic based on terrain type and elevation
 
 ## Technical highlights
 
 - **Chunk-based world generation**: Infinite procedural world with on-demand chunk generation
-- **A* pathfinding**: With diagonal movement, boat transitions, and swimming support
+- **A* pathfinding**: With diagonal movement, boat transitions, swimming, climbing, and skiing/snowboarding support
+- **Terrain types**: 12 distinct tile types including separate climbable mountains and impassable rocks
+- **Movement modes**: Walking, running, rowing, swimming, climbing, skiing (descending), snowboarding (ascending)
 - **Performance optimizations**:
   - Fish updates are view-aware with micro spatial hash
   - Animal pathfinding is budgeted per frame with local search radius
@@ -50,6 +57,9 @@ A tiny browser-based world rendered on a canvas with procedurally generated biom
 - **Movement constants** (easily configurable):
   - `PLAYER_SPEED`: 300 pixels/second
   - `SWIMMING_SPEED_MULTIPLIER`: 0.25 (4x slower)
+  - Climbing: 25x slower than walking
+  - Skiing: 2x slower than walking
+  - Snowboarding: 20x slower than walking
   - `SWIMMING_PATHFINDING_COST`: Auto-calculated from speed multiplier
 
 ## Performance notes
@@ -62,8 +72,11 @@ A tiny browser-based world rendered on a canvas with procedurally generated biom
 ## Troubleshooting
 
 - Different platforms render emojis differently; appearance may vary by font
-- World map shows all explored chunks; unexplored areas appear black
-- If player gets stuck, swimming can be used to escape (slower but always available)
+- World map shows all explored chunks with dynamic bounds; unexplored areas appear black
+- Player can swim to escape being stuck (slower but always available)
+- Small rocks (🪨) are impassable; click will navigate to adjacent tile
+- Mountain rocks can be climbed (very slow)
+- Snow can be traversed via skiing (descending) or snowboarding (ascending)
 
 ## Licence
 
