@@ -181,6 +181,7 @@ const FISH_SPAWN_MAX = ANIMAL_SPAWN_MAX / 2;
 const GOLD_PICKUP_RADIUS = 2 * TILE_SIZE; // More forgiving pickup radius
 
 const ANIMAL_TYPES = [
+  // Original List
   '\u{1F98C}', // Deer
   '\u{1F43B}', // Bear
   '\u{1F43A}', // Wolf
@@ -193,9 +194,178 @@ const ANIMAL_TYPES = [
   '\u{1F418}', // Elephant
   '\u{1F42D}', // Mouse
   '\u{1F42F}', // Tiger
-  '\u{1F41F}'  // Fish
+  '\u{1F41F}', // Fish
+
+  // --- Added Mammals ---
+  '\u{1F981}', // Lion
+  '\u{1F408}', // Cat
+  '\u{1F415}', // Dog
+  '\u{1F412}', // Monkey
+  '\u{1F428}', // Koala
+  '\u{1F43C}', // Panda
+  '\u{1F992}', // Giraffe
+  '\u{1F993}', // Zebra
+  '\u{1F998}', // Kangaroo
+  '\u{1F99D}', // Raccoon
+  '\u{1F9A6}', // Otter
+  '\u{1F9A5}', // Sloth
+  '\u{1F9A8}', // Skunk
+  '\u{1F9A1}', // Badger
+  '\u{1F994}', // Hedgehog
+  '\u{1F987}', // Bat
+
+  // --- Added Birds ---
+  '\u{1F414}', // Chicken
+  '\u{1F427}', // Penguin
+  '\u{1F426}', // Bird
+  '\u{1F985}', // Eagle
+  '\u{1F989}', // Owl
+  '\u{1F986}', // Duck
+  '\u{1F9A2}', // Swan
+  '\u{1F99A}', // Peacock
+  '\u{1F99C}', // Parrot
+
+  // --- Added Reptiles & Amphibians ---
+
+  '\u{1F40D}', // Snake
+  '\u{1F98E}', // Lizard
+  '\u{1F996}', // T-Rex
+
+  // --- Added Aquatic ---
+
+  '\u{1F438}', // Frog
+  '\u{1F40A}', // Crocodile
+  '\u{1F422}', // Turtle
+
+  '\u{1F42C}', // Dolphin
+  '\u{1F40B}', // Whale
+  '\u{1F988}', // Shark
+  '\u{1F419}', // Octopus
+  '\u{1F980}', // Crab
+  '\u{1F990}', // Shrimp
+  '\u{1F991}', // Squid
+
+  // --- Added Insects & Others ---
+  '\u{1F40C}', // Snail
+  '\u{1F98B}', // Butterfly
+  '\u{1F41B}', // Bug
+  '\u{1F41C}', // Ant
+  '\u{1F41D}', // Honeybee
+  '\u{1F41E}', // Lady Beetle
+  '\u{1F997}', // Cricket
+  '\u{1F577}', // Spider
+  '\u{1F982}', // Scorpion
+  '\u{1F99F}', // Mosquito
 ];
 
+// Animal categories for biome restrictions
+const FOREST_ANIMALS = ['\u{1F98C}', '\u{1F43B}', '\u{1F43A}', '\u{1F98A}']; // Deer, Bear, Wolf, Fox
+const GRASSLAND_ANIMALS = ['\u{1F430}', '\u{1F434}', '\u{1F437}', '\u{1F42E}', '\u{1F411}', '\u{1F418}']; // Rabbit, Horse, Pig, Cow, Sheep, Elephant
+const INSECTS = ['\u{1F40C}', '\u{1F98B}', '\u{1F41B}', '\u{1F41C}', '\u{1F41D}', '\u{1F41E}', '\u{1F997}', '\u{1F577}', '\u{1F982}', '\u{1F99F}']; // Snail, Butterfly, Bug, Ant, Honeybee, Lady Beetle, Cricket, Spider, Scorpion, Mosquito
+const WATER_ANIMALS = ['\u{1F42C}', '\u{1F40B}', '\u{1F988}', '\u{1F419}', '\u{1F980}', '\u{1F990}', '\u{1F991}', '\u{1F438}', '\u{1F40A}', '\u{1F422}']; // Dolphin, Whale, Shark, Octopus, Crab, Shrimp, Squid, Frog, Crocodile, Turtle
+const DESERT_ANIMALS = ['\u{1F40D}', '\u{1F98E}']; // Snake, Lizard
+const SETTLEMENT_ANIMALS = ['\u{1F42D}']; // Mouse
+
+// Animal speed configuration (pixels per second)
+// Format: [minSpeed, maxSpeed]
+const ANIMAL_SPEEDS = {
+    // Very Slow (5-15 px/sec)
+    '\u{1F40C}': [5, 10],    // Snail
+    '\u{1F418}': [10, 15],   // Elephant
+    '\u{1F422}': [8, 12],    // Turtle
+    '\u{1F9A5}': [6, 10],    // Sloth
+    
+    // Slow (15-25 px/sec)
+    '\u{1F41B}': [15, 20],   // Bug
+    '\u{1F41C}': [15, 20],   // Ant
+    '\u{1F577}': [15, 22],   // Spider
+    '\u{1F982}': [15, 22],   // Scorpion
+    '\u{1F43B}': [18, 25],   // Bear
+    '\u{1F437}': [18, 25],   // Pig
+    '\u{1F42E}': [18, 25],   // Cow
+    '\u{1F411}': [20, 28],   // Sheep
+    '\u{1F40A}': [20, 28],   // Crocodile
+    
+    // Medium (25-40 px/sec)
+    '\u{1F42D}': [25, 35],   // Mouse
+    '\u{1F438}': [25, 35],   // Frog
+    '\u{1F41D}': [25, 35],   // Honeybee
+    '\u{1F41E}': [25, 35],   // Lady Beetle
+    '\u{1F997}': [25, 35],   // Cricket
+    '\u{1F99F}': [25, 35],   // Mosquito
+    '\u{1F98B}': [28, 38],   // Butterfly
+    '\u{1F98E}': [30, 40],   // Lizard
+    '\u{1F40D}': [30, 40],   // Snake
+    '\u{1F980}': [28, 38],   // Crab
+    '\u{1F990}': [28, 38],   // Shrimp
+    '\u{1F991}': [30, 40],   // Squid
+    
+    // Fast (40-60 px/sec)
+    '\u{1F430}': [40, 55],   // Rabbit
+    '\u{1F98A}': [42, 58],   // Fox
+    '\u{1F43A}': [45, 60],   // Wolf
+    '\u{1F98C}': [45, 60],   // Deer
+    '\u{1F42F}': [45, 60],   // Tiger
+    '\u{1F981}': [45, 60],   // Lion
+    '\u{1F419}': [40, 55],   // Octopus
+    
+    // Very Fast (60-80 px/sec)
+    '\u{1F434}': [60, 75],   // Horse
+    '\u{1F42C}': [65, 80],   // Dolphin
+    '\u{1F988}': [65, 80],   // Shark
+    '\u{1F40B}': [55, 70],   // Whale
+    '\u{1F41F}': [50, 65],   // Fish
+};
+
+// Default speed for animals not in the speed map
+const DEFAULT_ANIMAL_SPEED = [30, 50];
+
+// Helper function to get animal speed
+function getAnimalSpeed(animalType) {
+    return ANIMAL_SPEEDS[animalType] || DEFAULT_ANIMAL_SPEED;
+}
+
+// Helper function to check if an animal can be on a specific tile type
+function canAnimalBeOnTile(animalType, tileType) {
+    // Settlement animals can go anywhere
+    if (SETTLEMENT_ANIMALS.includes(animalType)) return true;
+    
+    // Check water animals
+    if (WATER_ANIMALS.includes(animalType)) {
+        return tileType === TILE_TYPES.DEEP_WATER || tileType === TILE_TYPES.SHALLOW_WATER;
+    }
+    
+    // Water tiles are only for water animals
+    if (tileType === TILE_TYPES.DEEP_WATER || tileType === TILE_TYPES.SHALLOW_WATER) {
+        return false;
+    }
+    
+    // Check settlements - only settlement animals allowed
+    const isSettlement = tileType === TILE_TYPES.CITY_PAVED || tileType === TILE_TYPES.TOWN_ROAD || tileType === TILE_TYPES.VILLAGE_MUD;
+    if (isSettlement) return false;
+    
+    // Forest animals must stay in forest
+    if (FOREST_ANIMALS.includes(animalType)) {
+        return tileType === TILE_TYPES.FOREST;
+    }
+    
+    // Desert animals must stay in desert
+    if (DESERT_ANIMALS.includes(animalType)) {
+        return tileType === TILE_TYPES.DESERT;
+    }
+    
+    // Insects can be in grassland, desert, or beach
+    if (INSECTS.includes(animalType)) {
+        return tileType === TILE_TYPES.GRASS || tileType === TILE_TYPES.DESERT || tileType === TILE_TYPES.BEACH;
+    }
+    
+    // Grassland animals stay in grassland
+    if (GRASSLAND_ANIMALS.includes(animalType)) {
+        return tileType === TILE_TYPES.GRASS;
+    }
+    
+    return false;
+}
 
 const PLAYER_EMOJIS = {
     STANDING: '\u{1F9CD}', // Person standing
@@ -740,9 +910,13 @@ class LandAnimal {
         // Movement and timing
         const now = Date.now();
         this.vx = 0; this.vy = 0;
-        this.speed = 30 + Math.random() * 20; // 30-50 px/sec
+        
+        // Get speed based on animal type
+        const [minSpeed, maxSpeed] = getAnimalSpeed(type);
+        this.speed = minSpeed + Math.random() * (maxSpeed - minSpeed);
         this.targetSpeed = this.speed;
-        this.minSpeed = 10; this.maxSpeed = 70;
+        this.minSpeed = minSpeed;
+        this.maxSpeed = maxSpeed;
         this.nextSpeedTime = now + 2000 + Math.random() * 4000; // 2-6s
         this.lastMoveTime = now;
 
@@ -804,7 +978,13 @@ class LandAnimal {
         // Occasionally pick a small local waypoint and walk toward it
         if (currentTime >= this.nextWanderPick || !this.waypoint) {
             const rangeTiles = 4 + Math.floor(Math.random() * 4); // 4-7 tiles
-            this.waypoint = pickLocalWaypoint(this.x, this.y, rangeTiles, isWalkableLand);
+            this.waypoint = pickLocalWaypoint(this.x, this.y, rangeTiles, (x, y) => {
+                if (!isWalkableLand(x, y)) return false;
+                const tileX = Math.floor(x / TILE_SIZE);
+                const tileY = Math.floor(y / TILE_SIZE);
+                const tType = getTileType(tileX, tileY);
+                return canAnimalBeOnTile(this.type, tType);
+            });
             this.nextWanderPick = currentTime + 1000 + Math.random() * 2000; // 1-3s
         }
 
@@ -819,7 +999,12 @@ class LandAnimal {
                 const nx = dx / dist, ny = dy / dist;
                 const nxPos = this.x + nx * step;
                 const nyPos = this.y + ny * step;
-                if (isWalkable(nxPos, nyPos, false, false)) {
+                const tileX = Math.floor(nxPos / TILE_SIZE);
+                const tileY = Math.floor(nyPos / TILE_SIZE);
+                const tType = getTileType(tileX, tileY);
+                const canMove = isWalkable(nxPos, nyPos, false, false) && canAnimalBeOnTile(this.type, tType);
+                
+                if (canMove) {
                     this.x = nxPos; this.y = nyPos;
                     this.vx = nx * this.targetSpeed; this.vy = ny * this.targetSpeed;
                 } else {
@@ -857,7 +1042,12 @@ class LandAnimal {
                 const nx = dx / dist, ny = dy / dist;
                 const nxPos = this.x + nx * step;
                 const nyPos = this.y + ny * step;
-                if (isWalkable(nxPos, nyPos, false, false)) {
+                const tileX = Math.floor(nxPos / TILE_SIZE);
+                const tileY = Math.floor(nyPos / TILE_SIZE);
+                const tType = getTileType(tileX, tileY);
+                const canMove = isWalkable(nxPos, nyPos, false, false) && canAnimalBeOnTile(this.type, tType);
+                
+                if (canMove) {
                     this.x = nxPos; this.y = nyPos;
                     this.vx = nx * this.targetSpeed; this.vy = ny * this.targetSpeed;
                 } else {
@@ -873,6 +1063,7 @@ class LandAnimal {
         let targetX, targetY;
         let attempts = 0;
         const maxAttempts = 8; // keep attempts modest to avoid heavy bursts
+        
         while (attempts++ < maxAttempts) {
             const randomDistance = Math.random() * MAX_ANIMAL_SEARCH_DISTANCE;
             const randomAngle = Math.random() * Math.PI * 2;
@@ -882,10 +1073,19 @@ class LandAnimal {
             const c = clampToWorldPos(targetX, targetY);
             targetX = c.x; targetY = c.y;
             const tType = getTileType(Math.floor(targetX / TILE_SIZE), Math.floor(targetY / TILE_SIZE));
-            if (tType !== TILE_TYPES.DEEP_WATER && tType !== TILE_TYPES.SHALLOW_WATER && tType !== TILE_TYPES.ROCK) {
-                const newPath = findPath(this.x, this.y, targetX, targetY, false, MAX_ANIMAL_SEARCH_DISTANCE);
-                if (newPath) { this.path = newPath; return; }
+            
+            // Check if animal can be on this tile type
+            if (!canAnimalBeOnTile(this.type, tType)) {
+                continue;
             }
+            
+            // Also exclude rocks for land animals
+            if (tType === TILE_TYPES.ROCK && !WATER_ANIMALS.includes(this.type)) {
+                continue;
+            }
+            
+            const newPath = findPath(this.x, this.y, targetX, targetY, false, MAX_ANIMAL_SEARCH_DISTANCE);
+            if (newPath) { this.path = newPath; return; }
         }
         // fallback: switch to wander if no path found
         this.behavior = 'wander';
@@ -1080,15 +1280,42 @@ function generateChunk(chunkX, chunkY) {
                 goldNuggets.push({x: worldX * TILE_SIZE, y: worldY * TILE_SIZE});
             }
 
-            if (Math.random() < ANIMAL_DEATH_CHANCE && landAnimals.length > 1 )
-            {
-                //console.log("Animal died:" + animals[animals.length-1].type);
-                landAnimals.pop() // Still not great logic, but preserves original intent on land animals
+            if (Math.random() < ANIMAL_DEATH_CHANCE && landAnimals.length > 1) {
+                // Remove random animal instead of just popping last one
+                const randomIndex = Math.floor(Math.random() * landAnimals.length);
+                landAnimals.splice(randomIndex, 1);
             }
 
             if (Math.random() < ANIMAL_SPAWN_CHANCE && landAnimals.length < LAND_ANIMAL_SPAWN_MAX) {
-                if (biome === TILE_TYPES.GRASS || biome === TILE_TYPES.FOREST) {
-                    const type = ANIMAL_TYPES[Math.floor(Math.random() * (ANIMAL_TYPES.length - 2))];
+                const inSettlement = finalTile === TILE_TYPES.CITY_PAVED || finalTile === TILE_TYPES.TOWN_ROAD || finalTile === TILE_TYPES.VILLAGE_MUD;
+                let type;
+                
+                if (inSettlement) {
+                    // Settlements: only mice
+                    type = '\u{1F42D}';
+                } else if (biome === TILE_TYPES.FOREST) {
+                    // Forest: forest animals only
+                    type = FOREST_ANIMALS[Math.floor(Math.random() * FOREST_ANIMALS.length)];
+                } else if (biome === TILE_TYPES.GRASS) {
+                    // Grassland: grassland animals + insects
+                    const grasslandPool = [...GRASSLAND_ANIMALS, ...INSECTS];
+                    type = grasslandPool[Math.floor(Math.random() * grasslandPool.length)];
+                } else if (biome === TILE_TYPES.DESERT) {
+                    // Desert: desert animals + insects
+                    const desertPool = [...DESERT_ANIMALS, ...INSECTS];
+                    type = desertPool[Math.floor(Math.random() * desertPool.length)];
+                } else if (biome === TILE_TYPES.BEACH) {
+                    // Beach: insects only
+                    type = INSECTS[Math.floor(Math.random() * INSECTS.length)];
+                } else if (biome === TILE_TYPES.DEEP_WATER || biome === TILE_TYPES.SHALLOW_WATER) {
+                    // Water: water animals
+                    type = WATER_ANIMALS[Math.floor(Math.random() * WATER_ANIMALS.length)];
+                } else {
+                    // Skip spawning for other biomes
+                    continue;
+                }
+                
+                if (type) {
                     landAnimals.push(new LandAnimal(worldX * TILE_SIZE, worldY * TILE_SIZE, type));
                 }
             }
@@ -1407,18 +1634,20 @@ function drawWorld() {
             }
         });
 
-        // Draw Land Animals
+        // Draw Land Animals (with view culling)
         landAnimals.forEach(animal => {
             const animalX = animal.x - camera.x;
             const animalY = animal.y - camera.y;
             
+            // Cull animals outside viewport
+            if (animalX < -TILE_SIZE || animalX > vw + TILE_SIZE || animalY < -TILE_SIZE || animalY > vh + TILE_SIZE) {
+                return;
+            }
+            
             // FIXME
-            if (!(isAnimalTypeValid(animal.type)))  
-                {
-                animal.type=ANIMAL_TYPES[Math.floor(Math.random() * (ANIMAL_TYPES.length - 2))];
-                
-                //console.log("Animal born: "+animal.type);
-                }
+            if (!(isAnimalTypeValid(animal.type))) {
+                animal.type = ANIMAL_TYPES[Math.floor(Math.random() * (ANIMAL_TYPES.length - 2))];
+            }
             ctx.fillText(animal.type, animalX, animalY + TILE_SIZE);
         });
 
@@ -1489,14 +1718,23 @@ function drawNPCs() {
     // Draw NPCs with legs and show speech on hover or proximity
     const size = TILE_SIZE * 1.2;
     const playerDist = 80; // show speech if player within this distance
+    const cullDistance = Math.max(canvasLogicalSize.width, canvasLogicalSize.height) + 200; // Cull NPCs far from view
+    
     for (const n of npcs) {
+        const screenX = n.x - camera.x;
+        const screenY = n.y - camera.y;
+        
+        // Cull NPCs outside expanded viewport
+        if (screenX < -size * 2 || screenX > canvasLogicalSize.width + size * 2 ||
+            screenY < -size * 2 || screenY > canvasLogicalSize.height + size * 2) {
+            continue;
+        }
+        
         drawEmojiWithLegs(n.emoji, n.x, n.y, size, n.phase, { swingAmp: 0.15, swingSpeed: 1.5 });
         
         // Show name and speech bubble if player is close
         const d = distance(player.x, player.y, n.x, n.y);
         if (d < playerDist) {
-            const screenX = n.x - camera.x;
-            const screenY = n.y - camera.y;
             ctx.save();
             ctx.font = '10px Arial';
             ctx.fillStyle = 'rgba(0,0,0,0.8)';
@@ -2564,8 +2802,8 @@ async function movePlayer() {
             }
             
             // Smooth camera follow
-            camera.x = player.x - canvas.width / 2;
-            camera.y = player.y - canvas.height / 2;
+            camera.x = player.x - canvasLogicalSize.width / 2;
+            camera.y = player.y - canvasLogicalSize.height / 2;
 
             collectGold();
 
@@ -2594,6 +2832,44 @@ async function movePlayer() {
             player.currentEmoji = PLAYER_EMOJIS.STANDING;
         }
     });
+}
+
+// Entity culling to prevent indefinite growth
+function cullEntities() {
+    const cullDistance = 3000; // Remove entities more than 3000px from player
+    const minEntities = 10; // Keep at least this many entities of each type
+    
+    // Cull land animals
+    if (landAnimals.length > minEntities) {
+        landAnimals = landAnimals.filter(animal => {
+            const dist = distance(player.x, player.y, animal.x, animal.y);
+            return dist <= cullDistance;
+        });
+    }
+    
+    // Cull fish (but keep minimum population)
+    if (fishFlock.length > minEntities) {
+        fishFlock = fishFlock.filter(fish => {
+            const dist = distance(player.x, player.y, fish.x, fish.y);
+            return dist <= cullDistance;
+        });
+    }
+    
+    // Cull boats far from player
+    if (boats.length > minEntities) {
+        boats = boats.filter(boat => {
+            const dist = distance(player.x, player.y, boat.x, boat.y);
+            return dist <= cullDistance;
+        });
+    }
+    
+    // Cull gold nuggets far from player
+    if (goldNuggets.length > minEntities) {
+        goldNuggets = goldNuggets.filter(gold => {
+            const dist = distance(player.x, player.y, gold.x, gold.y);
+            return dist <= cullDistance;
+        });
+    }
 }
 
 // ============================================================================
@@ -2695,6 +2971,9 @@ class Game {
         // Reset animal pathfinding slots for this frame before moving animals
         animalPathfindSlots = animalPathfindBudgetPerFrame;
         measureExecutionTime('moveAnimals', moveAnimals);
+        
+        // Cull entities far from player to prevent infinite growth
+        measureExecutionTime('cullEntities', cullEntities);
         
         // Update UI state
         measureExecutionTime('updateUI', updateUI);
@@ -2800,12 +3079,13 @@ function drawDebugInfo(frameTime) {
     let yOffset = 20;
     const lineHeight = 15;
 
+    // Use logical size for positioning since context is already scaled
     ctx.fillText(`Frame Time: ${frameTime.toFixed(2)}ms`, 10, canvasLogicalSize.height - yOffset);
     yOffset += lineHeight;
 
     if (frameCount >= 60) {
         const avgFrameTime = totalFrameTime / frameCount;
-        const percent = (avgFrameTime / 16.67) * 100; // Assuming 60 FPS (1000ms/60 â‰ˆ 16.67ms per frame)
+        const percent = (avgFrameTime / 16.67) * 100; // Assuming 60 FPS (1000ms/60 ≈ 16.67ms per frame)
         ctx.fillText(`Avg Frame Time: ${avgFrameTime.toFixed(2)}ms (${percent.toFixed(2)}% of 16.67ms)`, 10, canvasLogicalSize.height - yOffset);
         yOffset += lineHeight;
 
@@ -2818,7 +3098,7 @@ function drawDebugInfo(frameTime) {
         if (times.length > 0) {
             const avgTime = times.reduce((a, b) => a + b, 0) / times.length;
             const percent = (avgTime / frameTime) * 100;
-            ctx.fillText(`${methodName}: ${avgTime.toFixed(2)}ms (${percent.toFixed(2)}%)`, 10, canvas.height - yOffset);
+            ctx.fillText(`${methodName}: ${avgTime.toFixed(2)}ms (${percent.toFixed(2)}%)`, 10, canvasLogicalSize.height - yOffset);
             yOffset += lineHeight;
         }
     }
@@ -3130,8 +3410,8 @@ async function initialiseGame() {
 
     player.x = startX * TILE_SIZE + TILE_SIZE / 2;
     player.y = startY * TILE_SIZE + TILE_SIZE / 2;
-    camera.x = player.x - canvas.width / 2;
-    camera.y = player.y - canvas.height / 2;
+    camera.x = player.x - canvasLogicalSize.width / 2;
+    camera.y = player.y - canvasLogicalSize.height / 2;
 
     await loadNewArea();
 
