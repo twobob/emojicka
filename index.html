@@ -933,12 +933,12 @@ function findNearestShore(x, y) {
 function isCoast(chunk, x, y) {
     const landTypes = [TILE_TYPES.BEACH, TILE_TYPES.GRASS, TILE_TYPES.FOREST, TILE_TYPES.DESERT, TILE_TYPES.ROCK];
     const waterTypes = [TILE_TYPES.DEEP_WATER, TILE_TYPES.SHALLOW_WATER];
-    const currentTile = chunk[y][x];
+    const currentTile = chunk.tiles[y][x];
     if (!landTypes.includes(currentTile)) return false;
     for (let dy = -1; dy <= 1; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
             if (dx === 0 && dy === 0) continue;
-            if (waterTypes.includes(chunk[y + dy][x + dx])) return true;
+            if (waterTypes.includes(chunk.tiles[y + dy][x + dx])) return true;
         }
     }
     return false;
@@ -977,17 +977,33 @@ function findNearestDeepWater(x, y) {
 }
 
 function generateChunk(chunkX, chunkY) {
-    const chunk = Array(CHUNK_SIZE).fill().map(() => Array(CHUNK_SIZE).fill(0));
+    const chunk = {
+        tiles: Array(CHUNK_SIZE).fill().map(() => Array(CHUNK_SIZE).fill(0)),
+        heightCache: Array(CHUNK_SIZE).fill().map(() => Array(CHUNK_SIZE).fill(0)),
+        biomeCache: Array(CHUNK_SIZE).fill().map(() => Array(CHUNK_SIZE).fill(0))
+    };
+    
+    // Pre-compute and cache all noise values for this chunk
     for (let y = 0; y < CHUNK_SIZE; y++) {
         for (let x = 0; x < CHUNK_SIZE; x++) {
             const worldX = chunkX * CHUNK_SIZE + x, worldY = chunkY * CHUNK_SIZE + y;
-            const biome = getBiome(worldX, worldY);
+            chunk.heightCache[y][x] = heightNoise(worldX, worldY);
+            chunk.biomeCache[y][x] = getBiome(worldX, worldY);
+        }
+    }
+    
+    // Generate tiles using cached values
+    for (let y = 0; y < CHUNK_SIZE; y++) {
+        for (let x = 0; x < CHUNK_SIZE; x++) {
+            const worldX = chunkX * CHUNK_SIZE + x, worldY = chunkY * CHUNK_SIZE + y;
+            const biome = chunk.biomeCache[y][x];
             // Place random rocks on grass using noise
             const rockNoise = (noise(worldX * 0.5, worldY * 0.5) + 1.0) / 2.0;
-            chunk[y][x] = biome === TILE_TYPES.GRASS && rockNoise > 0.9 ? TILE_TYPES.ROCK : biome;
+            chunk.tiles[y][x] = biome === TILE_TYPES.GRASS && rockNoise > 0.9 ? TILE_TYPES.ROCK : biome;
+            chunk.tiles[y][x] = biome === TILE_TYPES.GRASS && rockNoise > 0.9 ? TILE_TYPES.ROCK : biome;
             
             // Don't place gold on rocks or water
-            const finalTile = chunk[y][x];
+            const finalTile = chunk.tiles[y][x];
             if (Math.random() < GOLD_SPAWN_CHANCE && finalTile !== TILE_TYPES.DEEP_WATER && finalTile !== TILE_TYPES.SHALLOW_WATER && finalTile !== TILE_TYPES.ROCK) {
                 goldNuggets.push({x: worldX * TILE_SIZE, y: worldY * TILE_SIZE});
             }
@@ -1129,14 +1145,14 @@ function placeBoatsInChunk(chunkX, chunkY) {
         // Place boat in shallow water or beach near land
         for (let y = 1; y < CHUNK_SIZE - 1; y++) {
             for (let x = 1; x < CHUNK_SIZE - 1; x++) {
-                const tileType = chunk[y][x];
+                const tileType = chunk.tiles[y][x];
                 if (tileType === TILE_TYPES.SHALLOW_WATER || tileType === TILE_TYPES.BEACH) {
                     // Check if adjacent to land
                     let hasLandNeighbor = false;
                     for (let dy = -1; dy <= 1; dy++) {
                         for (let dx = -1; dx <= 1; dx++) {
                             if (dx === 0 && dy === 0) continue;
-                            const neighborType = chunk[y + dy][x + dx];
+                            const neighborType = chunk.tiles[y + dy][x + dx];
                             if (neighborType === TILE_TYPES.GRASS || neighborType === TILE_TYPES.FOREST || 
                                 neighborType === TILE_TYPES.BEACH || neighborType === TILE_TYPES.DESERT) {
                                 hasLandNeighbor = true;
@@ -1539,7 +1555,7 @@ function getTileType(x, y) {
     const localX = ((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
     const localY = ((y % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
     
-    return chunks[chunkKey][localY][localX];
+    return chunks[chunkKey].tiles[localY][localX];
 }
 
 function drawMinimap() {
@@ -1557,7 +1573,7 @@ function drawMinimap() {
                 for (let x = 0; x < CHUNK_SIZE; x++) {
                     const worldX = (chunkX * CHUNK_SIZE + x) * TILE_SIZE;
                     const worldY = (chunkY * CHUNK_SIZE + y) * TILE_SIZE;
-                    const tileType = chunk[y][x];
+                    const tileType = chunk.tiles[y][x];
                     const tileColor = getTileColor(tileType);
 
                     minimapCtx.fillStyle = tileColor;
@@ -2732,7 +2748,7 @@ function placeSettlement(cx, cy, radius, floorType) {
                         }
                         const localX = ((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
                         const localY = ((y % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-                        chunks[chunkKey][localY][localX] = floorType;
+                        chunks[chunkKey].tiles[localY][localX] = floorType;
                         tiles.push({x, y});
                     }
                 }
@@ -2858,7 +2874,7 @@ function spawnEvenSpread(cx, cy, radius, count, typePool) {
     }
 }
 
-async function initializeGame() {
+async function initialiseGame() {
     
     frameTimeSum = 0;
     frameCount = 0;
@@ -3037,7 +3053,7 @@ window.addEventListener('resize', () => {
     canvas.height = window.innerHeight;
 });
 
-initializeGame();
+initialiseGame();
 </script>
 </body>
 </html>
