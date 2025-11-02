@@ -45,14 +45,38 @@ const minimapCtx = minimapCanvas.getContext('2d');
 const worldMapCanvas = document.getElementById('worldMap');
 const worldMapCtx = worldMapCanvas.getContext('2d');
 
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
-minimapCanvas.width = 200;
-minimapCanvas.height = 200;
+// Get device pixel ratio for high-DPI displays
+const dpr = window.devicePixelRatio || 1;
 
-// World map setup - 89% of screen width/height
-worldMapCanvas.width = Math.floor(window.innerWidth * 0.89);
-worldMapCanvas.height = Math.floor(window.innerHeight * 0.89);
+// Function to properly size canvas with pixel ratio scaling
+function resizeCanvas(canvasElement, width, height) {
+    // Set display size (css pixels)
+    canvasElement.style.width = width + 'px';
+    canvasElement.style.height = height + 'px';
+    
+    // Set actual size in memory (scaled for DPI)
+    canvasElement.width = width * dpr;
+    canvasElement.height = height * dpr;
+    
+    // Scale context to match DPI
+    const canvasCtx = canvasElement.getContext('2d');
+    canvasCtx.scale(dpr, dpr);
+    
+    return { width, height }; // Return logical dimensions
+}
+
+// Initialise main canvas
+let canvasLogicalSize = resizeCanvas(canvas, window.innerWidth, window.innerHeight);
+
+// Initialise minimap (fixed size)
+resizeCanvas(minimapCanvas, 200, 200);
+
+// Initialise world map (89% of screen)
+let worldMapLogicalSize = resizeCanvas(
+    worldMapCanvas,
+    Math.floor(window.innerWidth * 0.89),
+    Math.floor(window.innerHeight * 0.89)
+);
 
 let worldMapVisible = false;
 let gamePaused = false;
@@ -1090,8 +1114,8 @@ function moveFish() {
         const currentTime = Date.now();
         const pad = 200; // expand view region to pre-update
         const viewLeft = camera.x - pad, viewTop = camera.y - pad;
-        const viewRight = camera.x + canvas.width + pad;
-        const viewBottom = camera.y + canvas.height + pad;
+        const viewRight = camera.x + canvasLogicalSize.width + pad;
+        const viewBottom = camera.y + canvasLogicalSize.height + pad;
         const nearRadius = 600; // also keep fish near the player active
 
         // Reuse pooled array for active fish (clear instead of creating new)
@@ -1228,8 +1252,8 @@ function isAnimalTypeValid(animalType) {
 async function loadNewArea() {
     loadingIndicator.style.display = 'block';
 
-    const visibleChunksX = Math.ceil(canvas.width / (CHUNK_SIZE * TILE_SIZE)) + 1;
-    const visibleChunksY = Math.ceil(canvas.height / (CHUNK_SIZE * TILE_SIZE)) + 1;
+    const visibleChunksX = Math.ceil(canvasLogicalSize.width / (CHUNK_SIZE * TILE_SIZE)) + 1;
+    const visibleChunksY = Math.ceil(canvasLogicalSize.height / (CHUNK_SIZE * TILE_SIZE)) + 1;
     const centerChunkX = Math.floor(player.x / (CHUNK_SIZE * TILE_SIZE));
     const centerChunkY = Math.floor(player.y / (CHUNK_SIZE * TILE_SIZE));
 
@@ -1327,8 +1351,8 @@ function drawWorld() {
         // Calculate visible chunk range
         const startChunkX = Math.floor(camera.x / (CHUNK_SIZE * TILE_SIZE));
         const startChunkY = Math.floor(camera.y / (CHUNK_SIZE * TILE_SIZE));
-        const endChunkX = Math.floor((camera.x + canvas.width) / (CHUNK_SIZE * TILE_SIZE)) + 1;
-        const endChunkY = Math.floor((camera.y + canvas.height) / (CHUNK_SIZE * TILE_SIZE)) + 1;
+        const endChunkX = Math.floor((camera.x + canvasLogicalSize.width) / (CHUNK_SIZE * TILE_SIZE)) + 1;
+        const endChunkY = Math.floor((camera.y + canvasLogicalSize.height) / (CHUNK_SIZE * TILE_SIZE)) + 1;
         
         // Draw visible chunks
         for (let chunkY = startChunkY; chunkY <= endChunkY; chunkY++) {
@@ -1374,7 +1398,7 @@ function drawWorld() {
         ctx.font = `${TILE_SIZE}px Arial`;
         
         // Draw Fish (cull offscreen for perf)
-        const vw = canvas.width, vh = canvas.height;
+        const vw = canvasLogicalSize.width, vh = canvasLogicalSize.height;
         fishFlock.forEach(animal => {
             const animalX = animal.x - camera.x;
             const animalY = animal.y - camera.y;
@@ -1934,20 +1958,22 @@ worldMapCanvas.addEventListener('click', async (event) => {
 minimapCanvas.addEventListener('click', async (event) => {
     if (worldMapVisible) return; // Don't handle clicks when world map is open
     
-    // Get click position relative to canvas
+    // Get click position relative to canvas (using logical dimensions)
     const rect = minimapCanvas.getBoundingClientRect();
-    const scaleX = minimapCanvas.width / rect.width;
-    const scaleY = minimapCanvas.height / rect.height;
+    const minimapWidth = 200;
+    const minimapHeight = 200;
+    const scaleX = minimapWidth / rect.width;
+    const scaleY = minimapHeight / rect.height;
     const clickX = (event.clientX - rect.left) * scaleX;
     const clickY = (event.clientY - rect.top) * scaleY;
     
     // Calculate minimap scale (MUST match drawMinimap)
     const minimapTileSize = TILE_SIZE * MINIMAP_SCALE;
-    const visibleTilesX = Math.ceil(minimapCanvas.width / minimapTileSize);
-    const visibleTilesY = Math.ceil(minimapCanvas.height / minimapTileSize);
+    const visibleTilesX = Math.ceil(minimapWidth / minimapTileSize);
+    const visibleTilesY = Math.ceil(minimapHeight / minimapTileSize);
     
-    const centerX = Math.floor(minimapCanvas.width / (2 * minimapTileSize));
-    const centerY = Math.floor(minimapCanvas.height / (2 * minimapTileSize));
+    const centerX = Math.floor(minimapWidth / (2 * minimapTileSize));
+    const centerY = Math.floor(minimapHeight / (2 * minimapTileSize));
     
     const startX = Math.floor(player.x / TILE_SIZE) - centerX;
     const startY = Math.floor(player.y / TILE_SIZE) - centerY;
@@ -2682,8 +2708,8 @@ class Game {
         // Emit pre-render event
         this.emit('game:preRender');
 
-        // Clear canvas
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // Clear canvas (use logical dimensions)
+        ctx.clearRect(0, 0, canvasLogicalSize.width, canvasLogicalSize.height);
         
         // Render world
         measureExecutionTime('drawWorld', drawWorld);
@@ -2774,13 +2800,13 @@ function drawDebugInfo(frameTime) {
     let yOffset = 20;
     const lineHeight = 15;
 
-    ctx.fillText(`Frame Time: ${frameTime.toFixed(2)}ms`, 10, canvas.height - yOffset);
+    ctx.fillText(`Frame Time: ${frameTime.toFixed(2)}ms`, 10, canvasLogicalSize.height - yOffset);
     yOffset += lineHeight;
 
     if (frameCount >= 60) {
         const avgFrameTime = totalFrameTime / frameCount;
         const percent = (avgFrameTime / 16.67) * 100; // Assuming 60 FPS (1000ms/60 â‰ˆ 16.67ms per frame)
-        ctx.fillText(`Avg Frame Time: ${avgFrameTime.toFixed(2)}ms (${percent.toFixed(2)}% of 16.67ms)`, 10, canvas.height - yOffset);
+        ctx.fillText(`Avg Frame Time: ${avgFrameTime.toFixed(2)}ms (${percent.toFixed(2)}% of 16.67ms)`, 10, canvasLogicalSize.height - yOffset);
         yOffset += lineHeight;
 
         // Reset total frame time and frame count every 60 frames
@@ -3241,8 +3267,28 @@ pathfindingForm.addEventListener('submit', async (event) => {
 });
 
 window.addEventListener('resize', () => {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    // Resize main canvas
+    const oldWidth = canvasLogicalSize.width;
+    const oldHeight = canvasLogicalSize.height;
+    canvasLogicalSize = resizeCanvas(canvas, window.innerWidth, window.innerHeight);
+    
+    // Adjust camera to maintain player position on screen
+    const widthDiff = canvasLogicalSize.width - oldWidth;
+    const heightDiff = canvasLogicalSize.height - oldHeight;
+    camera.x -= widthDiff / 2;
+    camera.y -= heightDiff / 2;
+    
+    // Resize world map
+    worldMapLogicalSize = resizeCanvas(
+        worldMapCanvas,
+        Math.floor(window.innerWidth * 0.89),
+        Math.floor(window.innerHeight * 0.89)
+    );
+    
+    // Redraw world map if visible
+    if (worldMapVisible) {
+        drawWorldMap();
+    }
 });
 
 initialiseGame();
