@@ -112,6 +112,28 @@ const TILE_TYPES = {
     CITY_PAVED: 7, TOWN_ROAD: 8, VILLAGE_MUD: 9, SNOW: 10, MOUNTAIN_ROCK: 11
 };
 
+// Tile type colors (must match TILE_TYPES order)
+const TILE_COLORS = [
+    '#0077BE',  // DEEP_WATER
+    '#89CFF0',  // SHALLOW_WATER
+    '#F4A460',  // BEACH
+    '#7CFC00',  // GRASS
+    '#228B22',  // FOREST
+    '#DEB887',  // DESERT
+    '#808080',  // ROCK (small unclimbable rocks)
+    '#4A4A4A',  // CITY_PAVED (dark grey)
+    '#8B7355',  // TOWN_ROAD (brown cart road)
+    '#6B5D52',  // VILLAGE_MUD (muddy brown)
+    '#FFFAFA',  // SNOW (off-white snow peak)
+    '#696969'   // MOUNTAIN_ROCK (dim grey, climbable mountains)
+];
+
+// Biome names (must match TILE_TYPES order)
+const BIOME_NAMES = [
+    'Deep Water', 'Shallow Water', 'Beach', 'Grassland', 'Forest', 'Desert', 
+    'Rocky', 'City', 'Town', 'Village', 'Snow Peak', 'Mountain'
+];
+
 let lastPathCompletionTime = 0;
 const AUTO_PATH_DELAY = 3000; // 3 seconds in milliseconds
 
@@ -1394,21 +1416,7 @@ function drawWorld() {
 
 
 function getTileColor(tileType) {
-    const colors = [
-        '#0077BE',  // DEEP_WATER
-        '#89CFF0',  // SHALLOW_WATER
-        '#F4A460',  // BEACH
-        '#7CFC00',  // GRASS
-        '#228B22',  // FOREST
-        '#DEB887',  // DESERT
-        '#808080',  // ROCK (small unclimbable rocks)
-        '#4A4A4A',  // CITY_PAVED (dark grey)
-        '#8B7355',  // TOWN_ROAD (brown cart road)
-        '#6B5D52',  // VILLAGE_MUD (muddy brown)
-        '#FFFAFA',  // SNOW (off-white snow peak)
-        '#696969'   // MOUNTAIN_ROCK (dim grey, climbable mountains)
-    ];
-    return colors[tileType] || '#000000';
+    return TILE_COLORS[tileType] || '#000000';
 }
 
 // Draw an emoji with simple overlaid legs using canvas lines
@@ -1632,8 +1640,7 @@ function updateUI() {
 }
 
 function getBiomeName(tileType) {
-    const biomes = ['Deep Water', 'Shallow Water', 'Beach', 'Grassland', 'Forest', 'Desert', 'Rocky', 'City', 'Town', 'Village', 'Snow Peak'];
-    return biomes[tileType] || 'Unknown';
+    return BIOME_NAMES[tileType] || 'Unknown';
 }
 
 function getTileType(x, y) {
