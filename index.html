@@ -130,7 +130,7 @@ const PLAYER_EMOJIS = {
     SWIMMING: '\u{1F3CA}', // Person swimming
     SKIING: '\u{26F7}',    // Skier (descending snow)
     SNOWBOARDING: '\u{1F3C2}', // Snowboarder (climbing snow)
-    CLIMBING: '\u{1F9D7}\u200D\u2642\uFE0F}' // Man climbing (mountain rocks)
+    CLIMBING: '\u{1F9D7}\u200D\u2642\uFE0F' // Man climbing (mountain rocks)
 };
 
 // NPC types with emoji, speech, and categories
@@ -795,29 +795,20 @@ function findNearestDeepWater(x, y) {
     return nearest;
 }
 
-
-
-
-
 function generateChunk(chunkX, chunkY) {
     const chunk = Array(CHUNK_SIZE).fill().map(() => Array(CHUNK_SIZE).fill(0));
     for (let y = 0; y < CHUNK_SIZE; y++) {
         for (let x = 0; x < CHUNK_SIZE; x++) {
             const worldX = chunkX * CHUNK_SIZE + x, worldY = chunkY * CHUNK_SIZE + y;
             const biome = getBiome(worldX, worldY);
-            // Don't override mountain/snow tiles with random rocks
-            chunk[y][x] = biome;
+            // Place random rocks on grass using noise
+            chunk[y][x] = biome === TILE_TYPES.GRASS && noise(worldX * 0.5, worldY * 0.5) > 0.9 ? TILE_TYPES.ROCK : biome;
             
-            if (Math.random() < GOLD_SPAWN_CHANCE && biome !== TILE_TYPES.DEEP_WATER && biome !== TILE_TYPES.SHALLOW_WATER) {
+            // Don't place gold on rocks or water
+            const finalTile = chunk[y][x];
+            if (Math.random() < GOLD_SPAWN_CHANCE && finalTile !== TILE_TYPES.DEEP_WATER && finalTile !== TILE_TYPES.SHALLOW_WATER && finalTile !== TILE_TYPES.ROCK) {
                 goldNuggets.push({x: worldX * TILE_SIZE, y: worldY * TILE_SIZE});
             }
-            
-            // This is handled by moveFish's population control
-            // if (animals.length  == ANIMAL_SPAWN_MAX)
-            // {
-            //     animals[0] = animals[animals.length -1]
-            //     animals.length =  ANIMAL_SPAWN_MAX
-            // }
 
             if (Math.random() < ANIMAL_DEATH_CHANCE && landAnimals.length > 1 )
             {
@@ -929,30 +920,45 @@ function placeBoatsInChunk(chunkX, chunkY) {
     const chunk = chunks[chunkKey];
     if (!chunk) return;
 
-    let boatPlaced = false;
-    for (let y = 0; y < CHUNK_SIZE; y++) {
-        for (let x = 0; x < CHUNK_SIZE; x++) {
-            const worldX = chunkX * CHUNK_SIZE + x, worldY = chunkY * CHUNK_SIZE + y;
-            if (isCoastInChunk(chunk, x, y) && !boatPlaced) {
-                boats.push({x: worldX * TILE_SIZE, y: worldY * TILE_SIZE});
-                boatPlaced = true;
+    // Check if this chunk has any coastline (land adjacent to water)
+    let hasCoast = false;
+    for (let y = 1; y < CHUNK_SIZE - 1 && !hasCoast; y++) {
+        for (let x = 1; x < CHUNK_SIZE - 1 && !hasCoast; x++) {
+            if (isCoast(chunk, x, y)) {
+                hasCoast = true;
             }
         }
     }
 
-    // If no coast was found, place a boat on any land tile
-    if (!boatPlaced) {
-        for (let y = 0; y < CHUNK_SIZE; y++) {
-            for (let x = 0; x < CHUNK_SIZE; x++) {
-                const worldX = chunkX * CHUNK_SIZE + x, worldY = chunkY * CHUNK_SIZE + y;
+    // Only place a boat if this chunk has a coast (part of an island)
+    if (hasCoast) {
+        // Place boat in shallow water or beach near land
+        for (let y = 1; y < CHUNK_SIZE - 1; y++) {
+            for (let x = 1; x < CHUNK_SIZE - 1; x++) {
                 const tileType = chunk[y][x];
-                if (tileType === TILE_TYPES.GRASS || tileType === TILE_TYPES.FOREST || tileType === TILE_TYPES.BEACH) {
-                    boats.push({x: worldX * TILE_SIZE, y: worldY * TILE_SIZE});
-                    boatPlaced = true;
-                    break;
+                if (tileType === TILE_TYPES.SHALLOW_WATER || tileType === TILE_TYPES.BEACH) {
+                    // Check if adjacent to land
+                    let hasLandNeighbor = false;
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dx = -1; dx <= 1; dx++) {
+                            if (dx === 0 && dy === 0) continue;
+                            const neighborType = chunk[y + dy][x + dx];
+                            if (neighborType === TILE_TYPES.GRASS || neighborType === TILE_TYPES.FOREST || 
+                                neighborType === TILE_TYPES.BEACH || neighborType === TILE_TYPES.DESERT) {
+                                hasLandNeighbor = true;
+                                break;
+                            }
+                        }
+                        if (hasLandNeighbor) break;
+                    }
+                    if (hasLandNeighbor) {
+                        const worldX = chunkX * CHUNK_SIZE + x;
+                        const worldY = chunkY * CHUNK_SIZE + y;
+                        boats.push({x: worldX * TILE_SIZE, y: worldY * TILE_SIZE});
+                        return; // One boat per chunk with coast
+                    }
                 }
             }
-            if (boatPlaced) break;
         }
     }
 }
@@ -1009,10 +1015,12 @@ function drawWorld() {
                     ctx.fillStyle = '#006400';
                     ctx.fill();
                 } else if (tileType === TILE_TYPES.ROCK) {
-                    ctx.beginPath();
-                    ctx.arc(tileX + TILE_SIZE / 2, tileY + TILE_SIZE / 2, TILE_SIZE / 3, 0, 2 * Math.PI);
-                    ctx.fillStyle = '#A9A9A9';
-                    ctx.fill();
+                    // Small impassable rock 🪨
+                    ctx.fillText('\u{1FAA8}', tileX, tileY + TILE_SIZE * 0.9);
+                } else if (tileType === TILE_TYPES.MOUNTAIN_ROCK) {
+                    // Climbable mountain rocks - light grey overlay
+                    ctx.fillStyle = '#D3D3D3';
+                    ctx.fillRect(tileX, tileY, TILE_SIZE, TILE_SIZE);
                 }
             }
         }
@@ -2190,6 +2198,11 @@ async function movePlayer() {
                 const dy = player.targetY - player.y;
                 const distanceToTarget = Math.sqrt(dx * dx + dy * dy);
                 
+                // Update player direction based on movement
+                if (Math.abs(dx) > 0.1) {
+                    player.direction = dx > 0 ? 'right' : 'left';
+                }
+                
                 if (distanceToTarget > 1.0) {
                     // Determine current speed based on movement state
                     let speedMultiplier = 1.0;
@@ -2241,6 +2254,12 @@ async function movePlayer() {
                         target = null;
                         lastPathCompletionTime = Date.now();
                         player.distanceTravelled = 0;
+                        
+                        // Clear movement states when path completes
+                        player.isSwimming = false;
+                        player.isClimbing = false;
+                        player.isSkiing = false;
+                        player.isSnowboarding = false;
                     }
                 }
             }

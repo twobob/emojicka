@@ -1,82 +1,50 @@
 # Emojicka
 
-A tiny browser-based world rendered on a canvas with procedurally generated biomes, settlements, NPCs, gold to collect, shoals of fish using lightweight flocking, land animals with centralised behaviour, and a player character with smooth movement and multiple traversal modes.
+A browser-based procedural world game with emoji-based graphics, featuring infinite terrain generation, pathfinding, NPC settlements, and multiple movement modes.
 
 ## Features
 
-- **Procedural world generation**: Infinite chunk-based world with deep/shallow water, beaches, grassland, forest, desert, small rocks (impassable), climbable mountain rocks, and snow using 3D Perlin noise for terrain height.
-- **Settlements**: Procedurally placed cities, towns, and villages with unique NPCs including royalty and an undead village.
+- **Procedural world generation**: Infinite chunk-based terrain with biomes including water (deep/shallow), beaches, grassland, forest, desert, impassable rocks, climbable mountains, and snow
+- **Settlements**: Cities, towns, and villages with unique NPCs (royalty, commoners, undead)
 - **Player movement**: 
-  - Smooth lerp-based movement with configurable speed
   - Click-to-move with A* pathfinding
-  - Automatic boat embark/disembark
-  - Swimming ability (4x slower than walking, used as fallback when no boat available)
-  - Mountain climbing (25x slower on climbable mountain rocks)
-  - Snow skiing when descending (2x slower)
-  - Snowboarding when ascending snow (20x slower)
-  - Diagonal movement with corner-cutting prevention
-  - Directional emoji flipping (emojis face correct direction based on movement)
-- **World map**: Press `W` to view entire explored world with dynamic bounds, click to navigate anywhere
-- **Minimap**: Shows nearby terrain, boats, and gold (click to navigate)
-- **Debug mode**: Press `D` to toggle visual debugging showing player position, tile centers, and boundaries
-- **NPCs**: 
-  - Categorised into royal, common, and undead types
-  - Unique King and Queen
-  - Undead village with zombies and vampires
-  - Speech bubbles with character-specific dialogue
-- **Gold collection**: Gold nuggets spawn on land with floating emoji feedback on collection
-- **Fish**: Efficient flocking with staggered updates, local neighbour lookups, and off-screen culling
-- **Land animals**: Centralised behaviour with smooth speed changes, low-cost wandering, and budget-limited pathfinding
-- **Safe spawn**: Player spawns in walkable areas using concentric circle search
-
-## How to run
-
-- Open `index.html` directly in a modern desktop browser
-- No build process or dependencies required
-- Resize the window as needed; canvas adapts automatically
+  - Automatic boat usage and swimming
+  - Mountain climbing and snow traversal (skiing/snowboarding)
+  - Diagonal movement with obstacle detection
+  - Direction-aware emoji display
+- **Navigation**: 
+  - World map (W key) - view entire explored world, click to travel
+  - Minimap - shows nearby terrain, boats, and gold
+  - Debug mode (D key) - visual position indicators
+- **NPCs**: Settlement-based characters with dialogue and unique roles (King, Queen, zombies, vampires)
+- **Gold collection**: Randomly spawned collectibles with visual feedback
+- **Wildlife**: Flocking fish in deep water, wandering land animals with AI pathfinding
+- **Safe spawn**: Player always starts on walkable terrain
 
 ## Controls
 
-- **Left Click**: Set destination (works on main map, minimap, and world map)
-- **W**: Toggle world map overlay (pauses game, shows all explored chunks)
-- **D**: Toggle debug mode (shows position indicators)
-- Player automatically boards boats when needed and disembarks at beaches
-- Swimming is automatic when crossing water without a boat
-- Climbing, skiing, and snowboarding are automatic based on terrain type and elevation
+- **Left Click**: Set destination (main canvas, minimap, or world map)
+- **W**: Toggle world map overlay
+- **D**: Toggle debug mode
+- Movement modes (boat, swimming, climbing, skiing) activate automatically based on terrain
 
-## Technical highlights
+## Technical Details
 
-- **Chunk-based world generation**: Infinite procedural world with on-demand chunk generation
-- **A* pathfinding**: With diagonal movement, boat transitions, swimming, climbing, and skiing/snowboarding support
-- **Terrain types**: 12 distinct tile types including separate climbable mountains and impassable rocks
-- **Movement modes**: Walking, running, rowing, swimming, climbing, skiing (descending), snowboarding (ascending)
-- **Performance optimizations**:
-  - Fish updates are view-aware with micro spatial hash
-  - Animal pathfinding is budgeted per frame with local search radius
-  - Shared helper functions for consistency
-- **Movement constants** (easily configurable):
-  - `PLAYER_SPEED`: 300 pixels/second
-  - `SWIMMING_SPEED_MULTIPLIER`: 0.25 (4x slower)
-  - Climbing: 25x slower than walking
-  - Skiing: 2x slower than walking
-  - Snowboarding: 20x slower than walking
-  - `SWIMMING_PATHFINDING_COST`: Auto-calculated from speed multiplier
+- **Chunk-based generation**: On-demand 40×40 tile chunks using Perlin noise
+- **Pathfinding**: A* algorithm with terrain-aware cost calculations
+- **Terrain types**: 12 distinct tiles with different movement properties
+- **Movement speeds**: Configurable base speed (300 px/s) with terrain modifiers (swimming 5x slower, climbing 25x slower, etc.)
+- **Performance**: View-culled fish rendering, budget-limited animal pathfinding, spatial hashing
 
-## Performance notes
+## Installation
 
-- Fish updates target only on-screen or near-player entities
-- Land animal pathfinding is budget-limited per frame
-- Chunk generation happens on-demand as player explores
-- Reduce spawn caps or increase update intervals if performance dips
+Open `index.html` in a modern browser. No build process or dependencies required.
 
-## Troubleshooting
+## Notes
 
-- Different platforms render emojis differently; appearance may vary by font
-- World map shows all explored chunks with dynamic bounds; unexplored areas appear black
-- Player can swim to escape being stuck (slower but always available)
-- Small rocks (🪨) are impassable; click will navigate to adjacent tile
-- Mountain rocks can be climbed (very slow)
-- Snow can be traversed via skiing (descending) or snowboarding (ascending)
+- Emoji appearance varies by platform/font
+- World map displays explored chunks; unexplored areas shown as black
+- Click on impassable rocks navigates to nearest walkable tile
 
 ## Licence
 
