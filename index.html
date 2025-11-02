@@ -1621,22 +1621,22 @@ function drawMinimap() {
             }
         }
 
+        minimapCtx.fillStyle = 'brown';
         boats.forEach(boat => {
-            minimapCtx.fillStyle = 'brown';
-            minimapCtx.fillRect(
-                boat.x * scale - offsetX,
-                boat.y * scale - offsetY,
-                4, 4
-            );
+            const boatMinimapX = boat.x * scale - offsetX;
+            const boatMinimapY = boat.y * scale - offsetY;
+            if (boatMinimapX >= 0 && boatMinimapX < minimapCanvas.width && boatMinimapY >= 0 && boatMinimapY < minimapCanvas.height) {
+                minimapCtx.fillRect(boatMinimapX, boatMinimapY, 4, 4);
+            }
         });
 
+        minimapCtx.fillStyle = 'gold';
         goldNuggets.forEach(gold => {
-            minimapCtx.fillStyle = 'gold';
-            minimapCtx.fillRect(
-                gold.x * scale - offsetX,
-                gold.y * scale - offsetY,
-                3, 3
-            );
+            const goldMinimapX = gold.x * scale - offsetX;
+            const goldMinimapY = gold.y * scale - offsetY;
+            if (goldMinimapX >= 0 && goldMinimapX < minimapCanvas.width && goldMinimapY >= 0 && goldMinimapY < minimapCanvas.height) {
+                minimapCtx.fillRect(goldMinimapX, goldMinimapY, 3, 3);
+            }
         });
 
         minimapCtx.fillStyle = 'red';
@@ -1755,53 +1755,6 @@ function drawWorldMap() {
         );
         worldMapCtx.fill();
     }
-}
-
-function drawMinimap() {
-    return measureExecutionTime('drawMinimap', () => {
-            minimapCtx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
-            
-            const minimapTileSize = TILE_SIZE * MINIMAP_SCALE;
-            const visibleTilesX = Math.ceil(minimapCanvas.width / minimapTileSize);
-            const visibleTilesY = Math.ceil(minimapCanvas.height / minimapTileSize);
-            
-            const centerX = Math.floor(minimapCanvas.width / (2 * minimapTileSize));
-            const centerY = Math.floor(minimapCanvas.height / (2 * minimapTileSize));
-            
-            const startX = Math.floor(player.x / TILE_SIZE) - centerX;
-            const startY = Math.floor(player.y / TILE_SIZE) - centerY;
-            
-            for (let y = 0; y < visibleTilesY; y++) {
-                for (let x = 0; x < visibleTilesX; x++) {
-                    const worldX = startX + x;
-                    const worldY = startY + y;
-                    const tileType = getTileType(worldX, worldY);
-                    minimapCtx.fillStyle = getTileColor(tileType);
-                    minimapCtx.fillRect(x * minimapTileSize, y * minimapTileSize, minimapTileSize, minimapTileSize);
-                }
-            }
-        
-        minimapCtx.fillStyle = 'red';
-        minimapCtx.fillRect(centerX * minimapTileSize, centerY * minimapTileSize, minimapTileSize, minimapTileSize);
-        
-        minimapCtx.fillStyle = 'brown';
-        boats.forEach(boat => {
-            const boatMinimapX = (boat.x / TILE_SIZE - startX) * minimapTileSize;
-            const boatMinimapY = (boat.y / TILE_SIZE - startY) * minimapTileSize;
-            if (boatMinimapX >= 0 && boatMinimapX < minimapCanvas.width && boatMinimapY >= 0 && boatMinimapY < minimapCanvas.height) {
-                minimapCtx.fillRect(boatMinimapX, boatMinimapY, minimapTileSize, minimapTileSize);
-            }
-        });
-    
-        minimapCtx.fillStyle = 'gold';
-        goldNuggets.forEach(gold => {
-            const goldMinimapX = (gold.x / TILE_SIZE - startX) * minimapTileSize;
-            const goldMinimapY = (gold.y / TILE_SIZE - startY) * minimapTileSize;
-            if (goldMinimapX >= 0 && goldMinimapX < minimapCanvas.width && goldMinimapY >= 0 && goldMinimapY < minimapCanvas.height) {
-                minimapCtx.fillRect(goldMinimapX, goldMinimapY, minimapTileSize, minimapTileSize);
-            }
-        });
-    });
 }
 
 // World map click handler
