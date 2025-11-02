@@ -1832,7 +1832,7 @@ worldMapCanvas.addEventListener('click', async (event) => {
     
     // Close the world map immediately (after getting rect, before heavy calculations)
     worldMapVisible = false;
-    gamePaused = false;
+    game.resume();
     worldMapCanvas.style.display = 'none';
     minimapCanvas.style.display = 'block';
     
@@ -2541,6 +2541,144 @@ async function movePlayer() {
 }
 
 // ============================================================================
+// EVENT-DRIVEN GAME ARCHITECTURE
+// ============================================================================
+// 
+// Game class encapsulates all game state and logic with clear separation:
+// - update(dt):  All game state changes (physics, AI, collision)
+//                Time-driven with delta time for frame-rate independence
+// - render():    All drawing operations (world, entities, UI)
+//                Pure rendering - no state changes
+// - Event system for decoupled communication between systems
+//
+// gameLoop():  Main scheduler running at ~60 FPS via requestAnimationFrame
+//              Coordinates update → render → debug cycles
+// ============================================================================
+
+class Game {
+    constructor() {
+        this.isPaused = false;
+        this.lastUpdateTime = 0;
+        this.eventListeners = new Map();
+        this.scheduledEvents = [];
+    }
+
+    // Event system for decoupled communication
+    on(eventName, callback) {
+        if (!this.eventListeners.has(eventName)) {
+            this.eventListeners.set(eventName, []);
+        }
+        this.eventListeners.get(eventName).push(callback);
+    }
+
+    off(eventName, callback) {
+        if (this.eventListeners.has(eventName)) {
+            const listeners = this.eventListeners.get(eventName);
+            const index = listeners.indexOf(callback);
+            if (index !== -1) {
+                listeners.splice(index, 1);
+            }
+        }
+    }
+
+    emit(eventName, data) {
+        if (this.eventListeners.has(eventName)) {
+            for (const callback of this.eventListeners.get(eventName)) {
+                callback(data);
+            }
+        }
+    }
+
+    // Schedule event to fire after delay
+    scheduleEvent(eventName, data, delayMs) {
+        const fireTime = performance.now() + delayMs;
+        this.scheduledEvents.push({ eventName, data, fireTime });
+        this.scheduledEvents.sort((a, b) => a.fireTime - b.fireTime);
+    }
+
+    // Process scheduled events
+    processScheduledEvents() {
+        const currentTime = performance.now();
+        while (this.scheduledEvents.length > 0 && this.scheduledEvents[0].fireTime <= currentTime) {
+            const event = this.scheduledEvents.shift();
+            this.emit(event.eventName, event.data);
+        }
+    }
+
+    pause() {
+        this.isPaused = true;
+        this.emit('game:paused');
+    }
+
+    resume() {
+        this.isPaused = false;
+        this.emit('game:resumed');
+    }
+
+    // Centralised update - all game state changes happen here
+    async update(dt) {
+        if (this.isPaused) {
+            return;
+        }
+
+        // Process scheduled events first
+        this.processScheduledEvents();
+
+        // Emit frame update event for other systems to hook into
+        this.emit('game:update', { dt });
+
+        // Update player emoji animation
+        measureExecutionTime('updatePlayerEmoji', updatePlayerEmoji);
+        
+        // Update player movement
+        await measureExecutionTime('movePlayer', movePlayer);
+        
+        // Update NPCs
+        measureExecutionTime('moveFish', moveFish);
+        
+        // Reset animal pathfinding slots for this frame before moving animals
+        animalPathfindSlots = animalPathfindBudgetPerFrame;
+        measureExecutionTime('moveAnimals', moveAnimals);
+        
+        // Update UI state
+        measureExecutionTime('updateUI', updateUI);
+
+        // Emit post-update event
+        this.emit('game:postUpdate', { dt });
+    }
+
+    // Centralised render - all drawing happens here
+    render() {
+        // Emit pre-render event
+        this.emit('game:preRender');
+
+        // Clear canvas
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Render world
+        measureExecutionTime('drawWorld', drawWorld);
+        
+        // Render animated emojis
+        updateAndRenderAnimatedEmojis();
+        
+        // Render NPCs
+        measureExecutionTime('drawNPCs', drawNPCs);
+        
+        // Render player
+        measureExecutionTime('drawPlayer', drawPlayer);
+        
+        // Render minimap
+        measureExecutionTime('drawMinimap', drawMinimap);
+
+        // Emit post-render event
+        this.emit('game:postRender');
+    }
+}
+
+// Global game instance
+const game = new Game();
+
+// ============================================================================
 // CENTRALISED GAME LOOP ARCHITECTURE
 // ============================================================================
 // The game loop is structured with clear separation of concerns:
@@ -2562,45 +2700,14 @@ async function movePlayer() {
 
 // Centralised update function - all game state changes happen here
 async function update(dt) {
-    // Only update game state when not paused
-    if (gamePaused) return;
-    
-    // Update player emoji animation
-    measureExecutionTime('updatePlayerEmoji', updatePlayerEmoji);
-    
-    // Update player movement
-    await measureExecutionTime('movePlayer', movePlayer);
-    
-    // Update NPCs
-    measureExecutionTime('moveFish', moveFish);
-    
-    // Reset animal pathfinding slots for this frame before moving animals
-    animalPathfindSlots = animalPathfindBudgetPerFrame;
-    measureExecutionTime('moveAnimals', moveAnimals);
-    
-    // Update UI state
-    measureExecutionTime('updateUI', updateUI);
+    // Delegate to game instance
+    await game.update(dt);
 }
 
 // Centralised render function - all drawing happens here
 function render() {
-    // Clear canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Render world
-    measureExecutionTime('drawWorld', drawWorld);
-    
-    // Render animated emojis
-    updateAndRenderAnimatedEmojis();
-    
-    // Render NPCs
-    measureExecutionTime('drawNPCs', drawNPCs);
-    
-    // Render player
-    measureExecutionTime('drawPlayer', drawPlayer);
-    
-    // Render minimap
-    measureExecutionTime('drawMinimap', drawMinimap);
+    // Delegate to game instance
+    game.render();
 }
 
 // Main game loop with fixed timestep and delta-time integration
@@ -2991,7 +3098,11 @@ document.addEventListener('keydown', (event) => {
     }
     if (event.key === 'w' || event.key === 'W') {
         worldMapVisible = !worldMapVisible;
-        gamePaused = worldMapVisible;
+        if (worldMapVisible) {
+            game.pause();
+        } else {
+            game.resume();
+        }
         worldMapCanvas.style.display = worldMapVisible ? 'block' : 'none';
         minimapCanvas.style.display = worldMapVisible ? 'none' : 'block';
         if (worldMapVisible) {
