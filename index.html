@@ -69,6 +69,31 @@ const targetXInput = document.getElementById('targetX');
 const targetYInput = document.getElementById('targetY');
 const loadingIndicator = document.getElementById('loadingIndicator');
 
+// Cache for UI values to avoid unnecessary DOM writes
+const uiCache = {
+    xPos: null,
+    yPos: null,
+    biome: null,
+    status: null,
+    plan: null,
+    goldCount: null
+};
+
+// Helper functions to update UI elements only when values change
+function setStatus(newStatus) {
+    if (uiCache.status !== newStatus) {
+        statusElement.textContent = newStatus;
+        uiCache.status = newStatus;
+    }
+}
+
+function setPlan(newPlan) {
+    if (uiCache.plan !== newPlan) {
+        planElement.textContent = newPlan;
+        uiCache.plan = newPlan;
+    }
+}
+
 const MAX_SEARCH_DISTANCE = 8192; // 409.6 tiles at 20 pixels per tile
 const MAX_ANIMAL_SEARCH_DISTANCE = 400; // Max search distance for animal random path
 
@@ -1186,6 +1211,8 @@ async function loadNewArea() {
     const centerChunkX = Math.floor(player.x / (CHUNK_SIZE * TILE_SIZE));
     const centerChunkY = Math.floor(player.y / (CHUNK_SIZE * TILE_SIZE));
 
+    // Collect all chunks that need to be generated
+    const chunksToGenerate = [];
     for (let dy = -Math.floor(visibleChunksY / 2); dy <= Math.floor(visibleChunksY / 2); dy++) {
         for (let dx = -Math.floor(visibleChunksX / 2); dx <= Math.floor(visibleChunksX / 2); dx++) {
             const chunkX = centerChunkX + dx;
@@ -1193,9 +1220,19 @@ async function loadNewArea() {
             const chunkKey = `${chunkX},${chunkY}`;
             
             if (!chunks[chunkKey]) {
-                chunks[chunkKey] = generateChunk(chunkX, chunkY);
-                await new Promise(resolve => setTimeout(resolve, 0));
+                chunksToGenerate.push({ chunkX, chunkY, chunkKey });
             }
+        }
+    }
+
+    // Generate chunks incrementally across multiple frames
+    for (let i = 0; i < chunksToGenerate.length; i++) {
+        const { chunkX, chunkY, chunkKey } = chunksToGenerate[i];
+        chunks[chunkKey] = generateChunk(chunkX, chunkY);
+        
+        // Yield to browser every 2 chunks to allow rendering
+        if (i % 2 === 1) {
+            await new Promise(resolve => requestAnimationFrame(resolve));
         }
     }
 
@@ -1550,24 +1587,47 @@ function updateUI() {
         const tileCenterX = tileX * TILE_SIZE + TILE_SIZE / 2;
         const tileCenterY = tileY * TILE_SIZE + TILE_SIZE / 2;
         
+        let newXPos, newYPos;
         if (debugMode) {
             const offsetX = (player.x - tileCenterX).toFixed(2);
             const offsetY = (player.y - tileCenterY).toFixed(2);
-            xPosElement.textContent = `${tileX} (px: ${player.x.toFixed(1)}, offset: ${offsetX})`;
-            yPosElement.textContent = `${tileY} (px: ${player.y.toFixed(1)}, offset: ${offsetY})`;
+            newXPos = `${tileX} (px: ${player.x.toFixed(1)}, offset: ${offsetX})`;
+            newYPos = `${tileY} (px: ${player.y.toFixed(1)}, offset: ${offsetY})`;
         } else {
-            xPosElement.textContent = tileX;
-            yPosElement.textContent = tileY;
+            newXPos = tileX.toString();
+            newYPos = tileY.toString();
+        }
+        
+        if (uiCache.xPos !== newXPos) {
+            xPosElement.textContent = newXPos;
+            uiCache.xPos = newXPos;
+        }
+        if (uiCache.yPos !== newYPos) {
+            yPosElement.textContent = newYPos;
+            uiCache.yPos = newYPos;
         }
         
         const tileType = getTileType(tileX, tileY);
-        biomeElement.textContent = getBiomeName(tileType);
-        if ( player.inBoat ) {statusElement.textContent = 'In Boat' };
-        statusElement.textContent = player.inBoat ? 'In Boat' : 'On Foot';
-        if (debugMode) {
-            statusElement.textContent += ' [DEBUG MODE]';
+        const newBiome = getBiomeName(tileType);
+        if (uiCache.biome !== newBiome) {
+            biomeElement.textContent = newBiome;
+            uiCache.biome = newBiome;
         }
-        goldCountElement.textContent = player.gold;
+        
+        let newStatus = player.inBoat ? 'In Boat' : 'On Foot';
+        if (debugMode) {
+            newStatus += ' [DEBUG MODE]';
+        }
+        if (uiCache.status !== newStatus) {
+            statusElement.textContent = newStatus;
+            uiCache.status = newStatus;
+        }
+        
+        const newGoldCount = player.gold.toString();
+        if (uiCache.goldCount !== newGoldCount) {
+            goldCountElement.textContent = newGoldCount;
+            uiCache.goldCount = newGoldCount;
+        }
     });
 }
 
@@ -1595,56 +1655,51 @@ function getTileType(x, y) {
 function drawMinimap() {
     return measureExecutionTime('drawMinimap', () => {
         minimapCtx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
-        const scale = MINIMAP_SCALE;
-        const offsetX = player.x * scale - minimapCanvas.width / 2;
-        const offsetY = player.y * scale - minimapCanvas.height / 2;
-
-        for (let chunkKey in chunks) {
-            const [chunkX, chunkY] = chunkKey.split(',').map(Number);
-            const chunk = chunks[chunkKey];
-
-            for (let y = 0; y < CHUNK_SIZE; y++) {
-                for (let x = 0; x < CHUNK_SIZE; x++) {
-                    const worldX = (chunkX * CHUNK_SIZE + x) * TILE_SIZE;
-                    const worldY = (chunkY * CHUNK_SIZE + y) * TILE_SIZE;
-                    const tileType = chunk.tiles[y][x];
-                    const tileColor = getTileColor(tileType);
-
-                    minimapCtx.fillStyle = tileColor;
-                    minimapCtx.fillRect(
-                        (worldX * scale - offsetX),
-                        (worldY * scale - offsetY),
-                        TILE_SIZE * scale + 1,
-                        TILE_SIZE * scale + 1
-                    );
-                }
+        
+        const minimapTileSize = TILE_SIZE * MINIMAP_SCALE;
+        const visibleTilesX = Math.ceil(minimapCanvas.width / minimapTileSize);
+        const visibleTilesY = Math.ceil(minimapCanvas.height / minimapTileSize);
+        
+        const centerX = Math.floor(minimapCanvas.width / (2 * minimapTileSize));
+        const centerY = Math.floor(minimapCanvas.height / (2 * minimapTileSize));
+        
+        const startX = Math.floor(player.x / TILE_SIZE) - centerX;
+        const startY = Math.floor(player.y / TILE_SIZE) - centerY;
+        
+        // Only draw tiles visible on minimap
+        for (let y = 0; y < visibleTilesY; y++) {
+            for (let x = 0; x < visibleTilesX; x++) {
+                const worldX = startX + x;
+                const worldY = startY + y;
+                const tileType = getTileType(worldX, worldY);
+                minimapCtx.fillStyle = getTileColor(tileType);
+                minimapCtx.fillRect(x * minimapTileSize, y * minimapTileSize, minimapTileSize, minimapTileSize);
             }
         }
-
+    
+        // Draw player at center
+        minimapCtx.fillStyle = 'red';
+        minimapCtx.fillRect(centerX * minimapTileSize, centerY * minimapTileSize, minimapTileSize, minimapTileSize);
+        
+        // Draw boats
         minimapCtx.fillStyle = 'brown';
         boats.forEach(boat => {
-            const boatMinimapX = boat.x * scale - offsetX;
-            const boatMinimapY = boat.y * scale - offsetY;
+            const boatMinimapX = (boat.x / TILE_SIZE - startX) * minimapTileSize;
+            const boatMinimapY = (boat.y / TILE_SIZE - startY) * minimapTileSize;
             if (boatMinimapX >= 0 && boatMinimapX < minimapCanvas.width && boatMinimapY >= 0 && boatMinimapY < minimapCanvas.height) {
-                minimapCtx.fillRect(boatMinimapX, boatMinimapY, 4, 4);
+                minimapCtx.fillRect(boatMinimapX, boatMinimapY, minimapTileSize, minimapTileSize);
             }
         });
-
+    
+        // Draw gold
         minimapCtx.fillStyle = 'gold';
         goldNuggets.forEach(gold => {
-            const goldMinimapX = gold.x * scale - offsetX;
-            const goldMinimapY = gold.y * scale - offsetY;
+            const goldMinimapX = (gold.x / TILE_SIZE - startX) * minimapTileSize;
+            const goldMinimapY = (gold.y / TILE_SIZE - startY) * minimapTileSize;
             if (goldMinimapX >= 0 && goldMinimapX < minimapCanvas.width && goldMinimapY >= 0 && goldMinimapY < minimapCanvas.height) {
-                minimapCtx.fillRect(goldMinimapX, goldMinimapY, 3, 3);
+                minimapCtx.fillRect(goldMinimapX, goldMinimapY, minimapTileSize, minimapTileSize);
             }
         });
-
-        minimapCtx.fillStyle = 'red';
-        minimapCtx.fillRect(
-            minimapCanvas.width / 2 - 2,
-            minimapCanvas.height / 2 - 2,
-            4, 4
-        );
     });
 }
 
@@ -2173,7 +2228,7 @@ async function transportToNearestBeach() {
         player.x = (nearestBeach.x + 0.5) * TILE_SIZE;
         player.y = (nearestBeach.y + 0.5) * TILE_SIZE;
         player.inBoat = false;
-        statusElement.textContent = 'Transported to Beach';
+        setStatus('Transported to Beach');
         await loadNewArea();
     } else {
         console.log('No nearby beach found');
@@ -2188,7 +2243,7 @@ function dismountFromBoat() {
     } //else {
       //  boats.push({x: player.x, y: player.y}); // Fallback if no shore is found
     //}
-    statusElement.textContent = 'Dismounted from Boat';
+    setStatus('Dismounted from Boat');
 }
 
 function collectGold() {
@@ -2210,7 +2265,7 @@ function collectGold() {
             });
             
             goldNuggets.splice(i, 1);
-            statusElement.textContent = "Found gold";
+            setStatus("Found gold");
             updateUI();
         }
     }
@@ -2342,17 +2397,17 @@ function generateRandomPath() {
         // Update status message
         switch(targetType) {
             case 'animal':
-                planElement.textContent = 'Moving towards an animal';
+                setPlan('Moving towards an animal');
                 break;
             case 'gold':
-                planElement.textContent = 'Moving towards gold';
+                setPlan('Moving towards gold');
                 break;
             default:
-                planElement.textContent = 'Exploring randomly';
+                setPlan('Exploring randomly');
         }
     } else {
         console.log('Failed to generate a valid path');
-        statusElement.textContent = 'Unable to find a valid path';
+        setStatus('Unable to find a valid path');
     }
 }
 async function movePlayer() {
@@ -2989,7 +3044,7 @@ canvas.addEventListener('click', async (event) => {
                     
                     if (path) {
                         console.log('Navigating to tile adjacent to rock');
-                        statusElement.textContent = 'Moving near rock';
+                        setStatus('Moving near rock');
                         return;
                     }
                     break;
@@ -2998,7 +3053,7 @@ canvas.addEventListener('click', async (event) => {
         }
         
         console.log('Cannot walk on rocks');
-        statusElement.textContent = 'Cannot walk on that terrain';
+        setStatus('Cannot walk on that terrain');
         return;
     }
     
@@ -3011,7 +3066,7 @@ canvas.addEventListener('click', async (event) => {
     if (!path) {
         if (debugMode) console.log('No path found or destination too far');
         target = null;
-        statusElement.textContent = 'Destination unreachable or too far';
+        setStatus('Destination unreachable or too far');
     } else {
         lastPathCompletionTime = Date.now(); // Reset the timer when the user clicks
     }
@@ -3029,7 +3084,7 @@ pathfindingForm.addEventListener('submit', async (event) => {
     if (!path) {
         if (debugMode) console.log('No path found or destination too far');
         target = null;
-        statusElement.textContent = 'Destination unreachable or too far';
+        setStatus('Destination unreachable or too far');
     } else {
         lastPathCompletionTime = Date.now(); // Reset the timer when a new path is set
     }
