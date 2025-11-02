@@ -49,3 +49,46 @@ Open `index.html` in a modern browser. No build process or dependencies required
 ## Licence
 
 MIT
+
+## Development
+
+### Code Style
+
+This project enforces consistent code style using ESLint and Prettier.
+
+**Naming Conventions:**
+- **Functions and variables**: camelCase (e.g., `findPath`, `playerX`)
+- **Classes**: PascalCase (e.g., `BinaryHeap`, `LandAnimal`)
+- **Constants**: SCREAMING_SNAKE_CASE (e.g., `TILE_SIZE`, `MAX_SEARCH_DISTANCE`)
+
+**Formatting:**
+- 4 spaces for indentation
+- Single quotes for strings
+- Semicolons required
+- 120 character line limit
+- Trailing commas not allowed
+
+### Setup Development Tools
+
+```bash
+# Install dependencies
+npm install
+
+# Check code style
+npm run lint
+
+# Auto-fix code style issues
+npm run lint:fix
+
+# Format code with Prettier
+npm run format
+
+# Check formatting without changing files
+npm run format:check
+```
+
+### Configuration Files
+
+- `.eslintrc.json` - ESLint rules for code quality and naming conventions
+- `.prettierrc.json` - Prettier formatting rules
+- `.eslintignore` / `.prettierignore` - Files to exclude from linting/formatting
