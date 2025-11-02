@@ -69,12 +69,12 @@ const targetXInput = document.getElementById('targetX');
 const targetYInput = document.getElementById('targetY');
 const loadingIndicator = document.getElementById('loadingIndicator');
 
-const MAX_SEARCH_DISTANCE = 4096; // 204.8 tiles at 20 pixels per tile
+const MAX_SEARCH_DISTANCE = 8192; // 409.6 tiles at 20 pixels per tile
 const MAX_ANIMAL_SEARCH_DISTANCE = 400; // Max search distance for animal random path
 
 // Terrain height thresholds
-    const HEIGHT_SNOW_THRESHOLD = 0.75; // Snow appears above this height
-const HEIGHT_MOUNTAIN_THRESHOLD = 0.65; // Mountain rocks appear above this height
+    const HEIGHT_SNOW_THRESHOLD = 0.72; // Snow appears above this height
+const HEIGHT_MOUNTAIN_THRESHOLD = 0.68; // Mountain rocks appear above this height
 
 // Player settings
 const PLAYER_SPEED = 300; // pixels per second (lower = slower, higher = faster)
@@ -980,7 +980,9 @@ function generateChunk(chunkX, chunkY) {
     const chunk = {
         tiles: Array(CHUNK_SIZE).fill().map(() => Array(CHUNK_SIZE).fill(0)),
         heightCache: Array(CHUNK_SIZE).fill().map(() => Array(CHUNK_SIZE).fill(0)),
-        biomeCache: Array(CHUNK_SIZE).fill().map(() => Array(CHUNK_SIZE).fill(0))
+        biomeCache: Array(CHUNK_SIZE).fill().map(() => Array(CHUNK_SIZE).fill(0)),
+        canvas: null,
+        rendered: false
     };
     
     // Pre-compute and cache all noise values for this chunk
@@ -999,7 +1001,6 @@ function generateChunk(chunkX, chunkY) {
             const biome = chunk.biomeCache[y][x];
             // Place random rocks on grass using noise
             const rockNoise = (noise(worldX * 0.5, worldY * 0.5) + 1.0) / 2.0;
-            chunk.tiles[y][x] = biome === TILE_TYPES.GRASS && rockNoise > 0.9 ? TILE_TYPES.ROCK : biome;
             chunk.tiles[y][x] = biome === TILE_TYPES.GRASS && rockNoise > 0.9 ? TILE_TYPES.ROCK : biome;
             
             // Don't place gold on rocks or water
@@ -1201,58 +1202,91 @@ async function loadNewArea() {
     loadingIndicator.style.display = 'none';
 }
 
+// Render chunk to offscreen canvas (called once per chunk)
+function renderChunkToCanvas(chunk, chunkX, chunkY) {
+    if (chunk.rendered) return;
+    
+    const chunkCanvas = document.createElement('canvas');
+    chunkCanvas.width = CHUNK_SIZE * TILE_SIZE;
+    chunkCanvas.height = CHUNK_SIZE * TILE_SIZE;
+    const chunkCtx = chunkCanvas.getContext('2d');
+    
+    chunkCtx.font = `${TILE_SIZE}px Arial`;
+    
+    for (let y = 0; y < CHUNK_SIZE; y++) {
+        for (let x = 0; x < CHUNK_SIZE; x++) {
+            const tileX = x * TILE_SIZE;
+            const tileY = y * TILE_SIZE;
+            const tileType = chunk.tiles[y][x];
+            const worldX = chunkX * CHUNK_SIZE + x;
+            const worldY = chunkY * CHUNK_SIZE + y;
+    
+            chunkCtx.fillStyle = getTileColor(tileType);
+            chunkCtx.fillRect(tileX, tileY, TILE_SIZE, TILE_SIZE);
+    
+            if (tileType === TILE_TYPES.FOREST) {
+                chunkCtx.beginPath();
+                chunkCtx.moveTo(tileX + TILE_SIZE / 2, tileY);
+                chunkCtx.lineTo(tileX, tileY + TILE_SIZE);
+                chunkCtx.lineTo(tileX + TILE_SIZE, tileY + TILE_SIZE);
+                chunkCtx.fillStyle = '#006400';
+                chunkCtx.fill();
+            } else if (tileType === TILE_TYPES.ROCK) {
+                // Small impassable rock 🪨
+                chunkCtx.fillText('\u{1FAA8}', tileX, tileY + TILE_SIZE * 0.9);
+            } else if (tileType === TILE_TYPES.MOUNTAIN_ROCK) {
+                // Climbable mountain rocks - shade based on elevation
+                const h = chunk.heightCache[y][x];
+                // Normalise to mountain range
+                const normalised = (h - HEIGHT_MOUNTAIN_THRESHOLD) / (HEIGHT_SNOW_THRESHOLD - HEIGHT_MOUNTAIN_THRESHOLD);
+                // Higher = lighter (downhill easier), lower = darker (uphill harder)
+                const lightness = Math.floor(80 + normalised * 80);
+                chunkCtx.fillStyle = `rgb(${lightness}, ${lightness}, ${lightness})`;
+                chunkCtx.fillRect(tileX, tileY, TILE_SIZE, TILE_SIZE);
+            } else if (tileType === TILE_TYPES.SNOW) {
+                // Snow - shade based on elevation
+                const h = chunk.heightCache[y][x];
+                const snowRange = h - HEIGHT_SNOW_THRESHOLD;
+                const maxSnowRange = 1.0 - HEIGHT_SNOW_THRESHOLD;
+                const normalised = Math.max(0, Math.min(1, snowRange / maxSnowRange));
+                if (normalised < 0.5) {
+                    chunkCtx.fillStyle = '#FAEBD7'; // antique white
+                } else {
+                    chunkCtx.fillStyle = '#FFFFFF'; // pure white
+                }
+                chunkCtx.fillRect(tileX, tileY, TILE_SIZE, TILE_SIZE);
+            }
+        }
+    }
+    
+    chunk.canvas = chunkCanvas;
+    chunk.rendered = true;
+}
+
 function drawWorld() {
     return measureExecutionTime('drawWorld', () => {
-        const startX = Math.floor(camera.x / TILE_SIZE);
-        const startY = Math.floor(camera.y / TILE_SIZE);
-        const endX = startX + Math.ceil(canvas.width / TILE_SIZE) + 1;
-        const endY = startY + Math.ceil(canvas.height / TILE_SIZE) + 1;
+        // Calculate visible chunk range
+        const startChunkX = Math.floor(camera.x / (CHUNK_SIZE * TILE_SIZE));
+        const startChunkY = Math.floor(camera.y / (CHUNK_SIZE * TILE_SIZE));
+        const endChunkX = Math.floor((camera.x + canvas.width) / (CHUNK_SIZE * TILE_SIZE)) + 1;
+        const endChunkY = Math.floor((camera.y + canvas.height) / (CHUNK_SIZE * TILE_SIZE)) + 1;
         
-        for (let y = startY; y < endY; y++) {
-            for (let x = startX; x < endX; x++) {
-                const tileX = x * TILE_SIZE - camera.x;
-                const tileY = y * TILE_SIZE - camera.y;
-                const tileType = getTileType(x, y);
-        
-                ctx.fillStyle = getTileColor(tileType);
-                ctx.fillRect(tileX, tileY, TILE_SIZE, TILE_SIZE);
-        
-                if (tileType === TILE_TYPES.FOREST) {
-                    ctx.beginPath();
-                    ctx.moveTo(tileX + TILE_SIZE / 2, tileY);
-                    ctx.lineTo(tileX, tileY + TILE_SIZE);
-                    ctx.lineTo(tileX + TILE_SIZE, tileY + TILE_SIZE);
-                    ctx.fillStyle = '#006400';
-                    ctx.fill();
-                } else if (tileType === TILE_TYPES.ROCK) {
-                    // Small impassable rock 🪨
-                    ctx.fillText('\u{1FAA8}', tileX, tileY + TILE_SIZE * 0.9);
-                } else if (tileType === TILE_TYPES.MOUNTAIN_ROCK) {
-                    // Climbable mountain rocks - shade based on elevation
-                    const h = heightNoise(x, y);
-                    // Normalise to mountain range
-                    const normalised = (h - HEIGHT_MOUNTAIN_THRESHOLD) / (HEIGHT_SNOW_THRESHOLD - HEIGHT_MOUNTAIN_THRESHOLD);
-                    // Higher = lighter (downhill easier), lower = darker (uphill harder)
-                    // Keep rocks in grey range: 80-160 (clearly grey, not white)
-                    const lightness = Math.floor(80 + normalised * 80); // Range: 80-160
-                    ctx.fillStyle = `rgb(${lightness}, ${lightness}, ${lightness})`;
-                    ctx.fillRect(tileX, tileY, TILE_SIZE, TILE_SIZE);
-                } else if (tileType === TILE_TYPES.SNOW) {
-                    // Snow - shade based on elevation
-                    const h = heightNoise(x, y);
-                    // Snow appears when h > HEIGHT_SNOW_THRESHOLD, range is threshold to 1.0
-                    const snowRange = h - HEIGHT_SNOW_THRESHOLD;
-                    const maxSnowRange = 1.0 - HEIGHT_SNOW_THRESHOLD;
-                    const normalised = Math.max(0, Math.min(1, snowRange / maxSnowRange));
-                    // Lower snow (uphill/harder) = antique white, higher (downhill/easier) = pure white
-                    if (normalised < 0.5) {
-                        // Lower elevations - antique white tint (FAEBD7)
-                        ctx.fillStyle = '#FAEBD7'; // antique white
-                    } else {
-                        // Higher elevations - pure white
-                        ctx.fillStyle = '#FFFFFF'; // pure white
+        // Draw visible chunks
+        for (let chunkY = startChunkY; chunkY <= endChunkY; chunkY++) {
+            for (let chunkX = startChunkX; chunkX <= endChunkX; chunkX++) {
+                const chunkKey = `${chunkX},${chunkY}`;
+                const chunk = chunks[chunkKey];
+                
+                if (chunk) {
+                    // Render chunk to canvas if not already done
+                    if (!chunk.rendered) {
+                        renderChunkToCanvas(chunk, chunkX, chunkY);
                     }
-                    ctx.fillRect(tileX, tileY, TILE_SIZE, TILE_SIZE);
+                    
+                    // Blit chunk canvas to main canvas
+                    const chunkScreenX = chunkX * CHUNK_SIZE * TILE_SIZE - camera.x;
+                    const chunkScreenY = chunkY * CHUNK_SIZE * TILE_SIZE - camera.y;
+                    ctx.drawImage(chunk.canvas, chunkScreenX, chunkScreenY);
                 }
             }
         }
