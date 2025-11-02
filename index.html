@@ -186,7 +186,7 @@ let frameTimeSum = 0;
 // ============================================================================
 // GAME LOOP TIMING CONFIGURATION
 // ============================================================================
-// Centralized frame scheduler with delta-time integration for smooth,
+// Centralised frame scheduler with delta-time integration for smooth,
 // frame-rate independent movement and physics.
 //
 // Benefits:
@@ -203,6 +203,32 @@ const MAX_DELTA_TIME = 0.1; // Cap delta at 100ms to prevent huge jumps from lag
 let lastFrameTime = performance.now();
 let animalPathTimeSum = 0;
 let frameCount = 0;
+
+// ============================================================================
+// OBJECT POOLS - Eliminate GC churn from per-frame allocations
+// ============================================================================
+// Reuse arrays, maps, and objects instead of creating new ones every frame.
+// This eliminates garbage collection spikes and improves performance.
+// ============================================================================
+
+// Reusable arrays for moveFish (avoid creating new arrays every frame)
+const activeFishPool = [];
+const neighborsPool = [];
+
+// Reusable spatial grid for fish (avoid new Map() every frame)
+const fishSpatialGrid = new Map();
+
+// Reusable set for expired fish tracking
+const expiredFishSet = new Set();
+
+// Reusable arrays for moveAnimals
+const nearAnimalsPool = [];
+const farAnimalsPool = [];
+
+// Reusable pathfinding structures (avoid new BinaryHeap/Set every call)
+const pathfindingHeap = new BinaryHeap(node => node.f);
+const pathfindingClosedSet = new Set();
+const pathfindingHeightCache = new Map();
 
 let chunks = {};
 let boats = [];
@@ -875,51 +901,63 @@ function moveFish() {
         const viewBottom = camera.y + canvas.height + pad;
         const nearRadius = 600; // also keep fish near the player active
 
-        // Determine active fish (onscreen or near player)
-        const activeFish = [];
+        // Reuse pooled array for active fish (clear instead of creating new)
+        activeFishPool.length = 0;
         for (const f of fishFlock) {
             if ((f.x >= viewLeft && f.x <= viewRight && f.y >= viewTop && f.y <= viewBottom) ||
                 distance(player.x, player.y, f.x, f.y) <= nearRadius) {
-                activeFish.push(f);
+                activeFishPool.push(f);
             }
         }
 
-    // Build a micro spatial hash for neighbours among active fish only
+        // Build spatial hash using reusable grid (clear instead of new Map())
         const cellSize = ALIGNMENT_DISTANCE; // ~100px cells
-        const grid = new Map();
+        fishSpatialGrid.clear();
         function cellKey(cx, cy) { return cx + ',' + cy; }
         function toCell(x, y) { return { cx: Math.floor(x / cellSize), cy: Math.floor(y / cellSize) }; }
 
-        for (const f of activeFish) {
+        for (const f of activeFishPool) {
             const c = toCell(f.x, f.y);
             const key = cellKey(c.cx, c.cy);
-            if (!grid.has(key)) grid.set(key, []);
-            grid.get(key).push(f);
+            if (!fishSpatialGrid.has(key)) fishSpatialGrid.set(key, []);
+            fishSpatialGrid.get(key).push(f);
         }
 
         // Update active fish using local neighborhood
-        const expiredSet = new Set();
-        for (const f of activeFish) {
+        expiredFishSet.clear();
+        for (const f of activeFishPool) {
             const c = toCell(f.x, f.y);
-            const neighbors = [];
+            // Reuse pooled neighbors array
+            neighborsPool.length = 0;
             for (let dy = -1; dy <= 1; dy++) {
                 for (let dx = -1; dx <= 1; dx++) {
                     const key = cellKey(c.cx + dx, c.cy + dy);
-                    const bucket = grid.get(key);
-                    if (bucket) neighbors.push(...bucket);
+                    const bucket = fishSpatialGrid.get(key);
+                    if (bucket) {
+                        for (const neighbor of bucket) {
+                            neighborsPool.push(neighbor);
+                        }
+                    }
                 }
             }
-            const hasExpired = f.update(neighbors, currentTime);
-            if (hasExpired) expiredSet.add(f);
+            const hasExpired = f.update(neighborsPool, currentTime);
+            if (hasExpired) expiredFishSet.add(f);
+        }
+
+        // Clear grid cell arrays for next frame (reuse arrays)
+        for (const cellArray of fishSpatialGrid.values()) {
+            cellArray.length = 0;
         }
 
         // Also expire old fish even if inactive, cheaply
         for (const f of fishFlock) {
-            if (currentTime - f.birthTime > f.lifespan) expiredSet.add(f);
+            if (currentTime - f.birthTime > f.lifespan) expiredFishSet.add(f);
         }
 
-        // Remove expired fish
-        fishFlock = fishFlock.filter(f => !expiredSet.has(f));
+        // Remove expired fish (filter creates new array, but only occasionally)
+        if (expiredFishSet.size > 0) {
+            fishFlock = fishFlock.filter(f => !expiredFishSet.has(f));
+        }
 
         // Spawn new fish to maintain population
         const desiredFishCount = FISH_SPAWN_MAX;
@@ -1773,27 +1811,28 @@ function findPath(startX, startY, endX, endY, isFish, maxSearchDistance = MAX_SE
     const endTileX = Math.floor(endX / TILE_SIZE) * TILE_SIZE;
     const endTileY = Math.floor(endY / TILE_SIZE) * TILE_SIZE;
     
-    // Cache height values to avoid recalculating noise for same tiles
-    const heightCache = new Map();
+    // Reuse pooled height cache (clear instead of new Map())
+    pathfindingHeightCache.clear();
     const getHeight = (tileX, tileY) => {
         const key = `${tileX},${tileY}`;
-        if (!heightCache.has(key)) {
-            heightCache.set(key, heightNoise(tileX, tileY));
+        if (!pathfindingHeightCache.has(key)) {
+            pathfindingHeightCache.set(key, heightNoise(tileX, tileY));
         }
-        return heightCache.get(key);
+        return pathfindingHeightCache.get(key);
     };
     
-    const openSet = new BinaryHeap(node => node.f);
-    const closedSet = new Set();
+    // Reuse pooled heap and closedSet (clear instead of new)
+    pathfindingHeap.clear();
+    pathfindingClosedSet.clear();
     const start = {x: startTileX, y: startTileY, f: 0, g: 0, h: 0, parent: null, inBoat: isFish === undefined ? player.inBoat : undefined, isSwimming: isFish === undefined ? player.isSwimming : false, isClimbing: isFish === undefined ? player.isClimbing : false, isSkiing: isFish === undefined ? player.isSkiing : false, isSnowboarding: isFish === undefined ? player.isSnowboarding : false};
     const end = {x: endTileX, y: endTileY};
 
-    openSet.push(start);
+    pathfindingHeap.push(start);
     
     let nodesExplored = 0;
 
-    while (openSet.size() > 0) {
-        const current = openSet.pop();
+    while (pathfindingHeap.size() > 0) {
+        const current = pathfindingHeap.pop();
         nodesExplored++;
 
         // Check if we've exceeded the maximum search distance
@@ -1822,7 +1861,7 @@ function findPath(startX, startY, endX, endY, isFish, maxSearchDistance = MAX_SE
             return path.reverse();
         }
 
-        closedSet.add(`${current.x},${current.y},${current.inBoat},${current.isSwimming || false},${current.isClimbing || false},${current.isSkiing || false},${current.isSnowboarding || false}`);
+        pathfindingClosedSet.add(`${current.x},${current.y},${current.inBoat},${current.isSwimming || false},${current.isClimbing || false},${current.isSkiing || false},${current.isSnowboarding || false}`);
 
         const neighbors = [
             {dx: -TILE_SIZE, dy: 0},
@@ -1958,15 +1997,15 @@ function findPath(startX, startY, endX, endY, isFish, maxSearchDistance = MAX_SE
             neighbor.f = neighbor.g + neighbor.h;
 
             const neighborKey = `${neighbor.x},${neighbor.y},${neighbor.inBoat},${neighbor.isSwimming},${neighbor.isClimbing},${neighbor.isSkiing},${neighbor.isSnowboarding}`;
-            if (closedSet.has(neighborKey)) continue;
+            if (pathfindingClosedSet.has(neighborKey)) continue;
 
-            if (!openSet.contains(neighbor)) {
-                openSet.push(neighbor);
+            if (!pathfindingHeap.contains(neighbor)) {
+                pathfindingHeap.push(neighbor);
             } else {
-                const existing = openSet.getNode(neighbor);
+                const existing = pathfindingHeap.getNode(neighbor);
                 if (existing && neighbor.g < existing.g) {
                     // Update and re-heapify
-                    openSet.updateNode(existing, neighbor);
+                    pathfindingHeap.updateNode(existing, neighbor);
                 }
             }
         }
@@ -2028,6 +2067,11 @@ class BinaryHeap {
 
     size() {
         return this.content.length;
+    }
+
+    clear() {
+        this.content.length = 0;
+        this.nodeMap.clear();
     }
 
     contains(node) {
@@ -2197,29 +2241,30 @@ function moveAnimals() {
     return measureExecutionTime('moveAnimals', () => {
         const currentTime = Date.now();
 
-        // Prioritise animals nearest the player for updates and pathing budget
-        const near = [];
-        const far = [];
+        // Reuse pooled arrays (clear instead of creating new)
+        nearAnimalsPool.length = 0;
+        farAnimalsPool.length = 0;
+        
         for (const animal of landAnimals) {
             const d = distance(player.x, player.y, animal.x, animal.y);
             if (d <= MAX_ANIMAL_SEARCH_DISTANCE) {
-                near.push({ animal, d });
+                nearAnimalsPool.push({ animal, d });
             } else {
-                far.push(animal);
+                farAnimalsPool.push(animal);
             }
         }
 
         // Sort near animals by ascending distance so closest consume budget first
-        near.sort((a, b) => a.d - b.d);
+        nearAnimalsPool.sort((a, b) => a.d - b.d);
 
-        for (const item of near) {
+        for (const item of nearAnimalsPool) {
             const a = item.animal;
             if (typeof a.update === 'function') a.update(currentTime);
         }
 
         // Keep far animals cheap
-        for (const a of far) {
-            if (a.path && a.path.length > 0) a.path = [];
+        for (const a of farAnimalsPool) {
+            if (a.path && a.path.length > 0) a.path.length = 0; // Clear array instead of replacing
         }
     });
 }
@@ -2233,10 +2278,17 @@ function generateRandomPath() {
     // Function to calculate distance between two points
     const distance = (x1, y1, x2, y2) => Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
     
-    // Find nearby POIs (animals and gold)
-    const nearbyPOIs = [...landAnimals, ...fishFlock, ...goldNuggets].filter(poi => 
-        distance(player.x, player.y, poi.x, poi.y) <= maxDistance
-    );
+    // Find nearby POIs (animals and gold) - avoid spread operator and filter
+    const nearbyPOIs = [];
+    for (const poi of landAnimals) {
+        if (distance(player.x, player.y, poi.x, poi.y) <= maxDistance) nearbyPOIs.push(poi);
+    }
+    for (const poi of fishFlock) {
+        if (distance(player.x, player.y, poi.x, poi.y) <= maxDistance) nearbyPOIs.push(poi);
+    }
+    for (const poi of goldNuggets) {
+        if (distance(player.x, player.y, poi.x, poi.y) <= maxDistance) nearbyPOIs.push(poi);
+    }
     
     do {
     // Prioritise POIs if available
@@ -2419,7 +2471,7 @@ async function movePlayer() {
 }
 
 // ============================================================================
-// CENTRALIZED GAME LOOP ARCHITECTURE
+// CENTRALISED GAME LOOP ARCHITECTURE
 // ============================================================================
 // The game loop is structured with clear separation of concerns:
 //
@@ -2438,7 +2490,7 @@ async function movePlayer() {
 // - Ad-hoc function calls scattered across the codebase
 // ============================================================================
 
-// Centralized update function - all game state changes happen here
+// Centralised update function - all game state changes happen here
 async function update(dt) {
     // Only update game state when not paused
     if (gamePaused) return;
@@ -2460,7 +2512,7 @@ async function update(dt) {
     measureExecutionTime('updateUI', updateUI);
 }
 
-// Centralized render function - all drawing happens here
+// Centralised render function - all drawing happens here
 function render() {
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
