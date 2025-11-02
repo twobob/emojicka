@@ -72,6 +72,10 @@ const loadingIndicator = document.getElementById('loadingIndicator');
 const MAX_SEARCH_DISTANCE = 4096; // 204.8 tiles at 20 pixels per tile
 const MAX_ANIMAL_SEARCH_DISTANCE = 400; // Max search distance for animal random path
 
+// Terrain height thresholds
+    const HEIGHT_SNOW_THRESHOLD = 0.75; // Snow appears above this height
+const HEIGHT_MOUNTAIN_THRESHOLD = 0.65; // Mountain rocks appear above this height
+
 // Player settings
 const PLAYER_SPEED = 300; // pixels per second (lower = slower, higher = faster)
 const PLAYER_SIZE = 20; // size of player emoji in pixels
@@ -179,6 +183,23 @@ let lastAnimationTime = 0;
 let animatedEmojis = [];
 
 let frameTimeSum = 0;
+// ============================================================================
+// GAME LOOP TIMING CONFIGURATION
+// ============================================================================
+// Centralized frame scheduler with delta-time integration for smooth,
+// frame-rate independent movement and physics.
+//
+// Benefits:
+// - Consistent movement speed across different frame rates
+// - Prevents stuttering and uneven physics
+// - Protects against "spiral of death" from lag spikes
+// - Clear separation between update (game state) and render (display)
+// ============================================================================
+
+const TARGET_FPS = 60;
+const TARGET_FRAME_TIME = 1000 / TARGET_FPS; // ~16.67ms per frame
+const MAX_DELTA_TIME = 0.1; // Cap delta at 100ms to prevent huge jumps from lag
+
 let lastFrameTime = performance.now();
 let animalPathTimeSum = 0;
 let frameCount = 0;
@@ -673,8 +694,10 @@ function noise(x, y) {
 function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
 function lerp(t, a, b) { return a + t * (b - a); }
 function grad(hash, x, y) {
-    const h = hash & 15, grad = 1 + (h & 7);
-    return ((h & 8) ? -grad : grad) * x + ((h & 4) ? -grad : grad) * y;
+    const h = hash & 15;
+    const u = h < 8 ? x : y;
+    const v = h < 4 ? y : (h === 12 || h === 14 ? x : 0);
+    return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
 }
 
 const p = new Array(512);
@@ -682,29 +705,32 @@ for (let i = 0; i < 256; i++) p[i] = p[i + 256] = Math.floor(Math.random() * 256
 
 // Height map noise (low frequency for elevation)
 function heightNoise(x, y) {
-    // Use very low frequency (divide by larger number) for smooth, broad elevation changes
-    const h1 = noise(x / 120, y / 120); // Broad features (slightly higher frequency)
-    const h2 = noise(x / 60 + 5000, y / 60 + 5000); // Medium features (higher frequency)
-    const h3 = noise(x / 30 + 10000, y / 30 + 10000); // Fine detail (higher frequency)
+    // Use lower frequency for broader features, but not TOO low or we get no peaks
+    const h1 = noise(x / 80, y / 80); // Broad features (base terrain)
+    const h2 = noise(x / 40 + 5000, y / 40 + 5000); // Medium features (hills)
+    const h3 = noise(x / 20 + 10000, y / 20 + 10000); // Fine detail (variation)
     // Combine octaves for natural-looking terrain
-    return h1 * 0.6 + h2 * 0.3 + h3 * 0.1;
+    const combined = h1 * 0.6 + h2 * 0.3 + h3 * 0.1;
+    
+    // Perlin noise returns roughly [-1, 1], so combined is also roughly [-1, 1]
+    // Map to [0, 1] properly
+    return (combined + 1.0) / 2.0;
 }
 
 function getBiome(x, y) {
-    const e = noise(x / 50, y / 50); // Elevation/moisture
-    const m = noise(x / 30 + 1000, y / 30 + 1000); // Moisture/temperature
-    const h = heightNoise(x, y); // Height/elevation (mountains)
+    // Perlin noise returns roughly [-1, 1], normalise to [0, 1]
+    const e = (noise(x / 50, y / 50) + 1.0) / 2.0; // Elevation/moisture
+    const m = (noise(x / 30 + 1000, y / 30 + 1000) + 1.0) / 2.0; // Moisture/temperature
+    const h = heightNoise(x, y); // Height/elevation (mountains) - returns [0,1]
     
-    // Water levels
+    // High mountains override everything - they rise above water
+    if (h > HEIGHT_SNOW_THRESHOLD) return TILE_TYPES.SNOW;
+    if (h > HEIGHT_MOUNTAIN_THRESHOLD) return TILE_TYPES.MOUNTAIN_ROCK;
+    
+    // Water levels (only below mountain height)
     if (e < 0.3) return TILE_TYPES.DEEP_WATER;
     if (e < 0.4) return TILE_TYPES.SHALLOW_WATER;
     if (e < 0.45) return TILE_TYPES.BEACH;
-    
-    // Mountain peaks with snow (high elevation)
-    if (h > 0.995) return TILE_TYPES.SNOW;
-    
-    // Mountain/rocky areas (medium-high elevation) - climbable
-    if (h > 0.65) return TILE_TYPES.MOUNTAIN_ROCK;
     
     // Normal biomes (low elevation)
     if (e > 0.8) return m < 0.4 ? TILE_TYPES.DESERT : TILE_TYPES.GRASS;
@@ -802,7 +828,8 @@ function generateChunk(chunkX, chunkY) {
             const worldX = chunkX * CHUNK_SIZE + x, worldY = chunkY * CHUNK_SIZE + y;
             const biome = getBiome(worldX, worldY);
             // Place random rocks on grass using noise
-            chunk[y][x] = biome === TILE_TYPES.GRASS && noise(worldX * 0.5, worldY * 0.5) > 0.9 ? TILE_TYPES.ROCK : biome;
+            const rockNoise = (noise(worldX * 0.5, worldY * 0.5) + 1.0) / 2.0;
+            chunk[y][x] = biome === TILE_TYPES.GRASS && rockNoise > 0.9 ? TILE_TYPES.ROCK : biome;
             
             // Don't place gold on rocks or water
             const finalTile = chunk[y][x];
@@ -1018,8 +1045,30 @@ function drawWorld() {
                     // Small impassable rock 🪨
                     ctx.fillText('\u{1FAA8}', tileX, tileY + TILE_SIZE * 0.9);
                 } else if (tileType === TILE_TYPES.MOUNTAIN_ROCK) {
-                    // Climbable mountain rocks - light grey overlay
-                    ctx.fillStyle = '#D3D3D3';
+                    // Climbable mountain rocks - shade based on elevation
+                    const h = heightNoise(x, y);
+                    // Normalise to mountain range
+                    const normalised = (h - HEIGHT_MOUNTAIN_THRESHOLD) / (HEIGHT_SNOW_THRESHOLD - HEIGHT_MOUNTAIN_THRESHOLD);
+                    // Higher = lighter (downhill easier), lower = darker (uphill harder)
+                    // Keep rocks in grey range: 80-160 (clearly grey, not white)
+                    const lightness = Math.floor(80 + normalised * 80); // Range: 80-160
+                    ctx.fillStyle = `rgb(${lightness}, ${lightness}, ${lightness})`;
+                    ctx.fillRect(tileX, tileY, TILE_SIZE, TILE_SIZE);
+                } else if (tileType === TILE_TYPES.SNOW) {
+                    // Snow - shade based on elevation
+                    const h = heightNoise(x, y);
+                    // Snow appears when h > HEIGHT_SNOW_THRESHOLD, range is threshold to 1.0
+                    const snowRange = h - HEIGHT_SNOW_THRESHOLD;
+                    const maxSnowRange = 1.0 - HEIGHT_SNOW_THRESHOLD;
+                    const normalised = Math.max(0, Math.min(1, snowRange / maxSnowRange));
+                    // Lower snow (uphill/harder) = antique white, higher (downhill/easier) = pure white
+                    if (normalised < 0.5) {
+                        // Lower elevations - antique white tint (FAEBD7)
+                        ctx.fillStyle = '#FAEBD7'; // antique white
+                    } else {
+                        // Higher elevations - pure white
+                        ctx.fillStyle = '#FFFFFF'; // pure white
+                    }
                     ctx.fillRect(tileX, tileY, TILE_SIZE, TILE_SIZE);
                 }
             }
@@ -1542,13 +1591,20 @@ function drawMinimap() {
 worldMapCanvas.addEventListener('click', async (event) => {
     if (!worldMapVisible) return;
     
-    // Get click position relative to canvas
+    // Get click position relative to canvas BEFORE hiding it
     const rect = worldMapCanvas.getBoundingClientRect();
     const scaleX = worldMapCanvas.width / rect.width;
     const scaleY = worldMapCanvas.height / rect.height;
     const clickX = (event.clientX - rect.left) * scaleX;
     const clickY = (event.clientY - rect.top) * scaleY;
     
+    // Close the world map immediately (after getting rect, before heavy calculations)
+    worldMapVisible = false;
+    gamePaused = false;
+    worldMapCanvas.style.display = 'none';
+    minimapCanvas.style.display = 'block';
+    
+    const chunkIterStart = performance.now();
     // Find bounds of all generated chunks (same as drawWorldMap)
     let minChunkX = Infinity, maxChunkX = -Infinity;
     let minChunkY = Infinity, maxChunkY = -Infinity;
@@ -1560,6 +1616,8 @@ worldMapCanvas.addEventListener('click', async (event) => {
         minChunkY = Math.min(minChunkY, cy);
         maxChunkY = Math.max(maxChunkY, cy);
     }
+    const chunkIterEnd = performance.now();
+    console.log(`Chunk iteration took ${(chunkIterEnd - chunkIterStart).toFixed(2)}ms for ${Object.keys(chunks).length} chunks`);
     
     if (minChunkX === Infinity) return; // No chunks yet
     
@@ -1602,7 +1660,10 @@ worldMapCanvas.addEventListener('click', async (event) => {
     
     // Set path to this location
     target = { x: worldX, y: worldY };
-    path = findPath(player.x, player.y, worldX, worldY, undefined, MAX_SEARCH_DISTANCE);
+    const pathStartTime = performance.now();
+    path = findPath(player.x, player.y, worldX, worldY, undefined, MAX_SEARCH_DISTANCE, true); // true = simple mode (no height checks)
+    const pathEndTime = performance.now();
+    console.log(`Pathfinding took ${(pathEndTime - pathStartTime).toFixed(2)}ms, path found: ${path !== null}, path length: ${path ? path.length : 0}`);
 });
 
 // Minimap click handler
@@ -1705,12 +1766,22 @@ function direction(x1, y1, x2, y2) {
 }
 
 
-function findPath(startX, startY, endX, endY, isFish, maxSearchDistance = MAX_SEARCH_DISTANCE) {
+function findPath(startX, startY, endX, endY, isFish, maxSearchDistance = MAX_SEARCH_DISTANCE, simpleMode = false) {
     // Snap start and end to tile grid (top-left corners for pathfinding)
     const startTileX = Math.floor(startX / TILE_SIZE) * TILE_SIZE;
     const startTileY = Math.floor(startY / TILE_SIZE) * TILE_SIZE;
     const endTileX = Math.floor(endX / TILE_SIZE) * TILE_SIZE;
     const endTileY = Math.floor(endY / TILE_SIZE) * TILE_SIZE;
+    
+    // Cache height values to avoid recalculating noise for same tiles
+    const heightCache = new Map();
+    const getHeight = (tileX, tileY) => {
+        const key = `${tileX},${tileY}`;
+        if (!heightCache.has(key)) {
+            heightCache.set(key, heightNoise(tileX, tileY));
+        }
+        return heightCache.get(key);
+    };
     
     const openSet = new BinaryHeap(node => node.f);
     const closedSet = new Set();
@@ -1718,17 +1789,21 @@ function findPath(startX, startY, endX, endY, isFish, maxSearchDistance = MAX_SE
     const end = {x: endTileX, y: endTileY};
 
     openSet.push(start);
+    
+    let nodesExplored = 0;
 
     while (openSet.size() > 0) {
         const current = openSet.pop();
+        nodesExplored++;
 
         // Check if we've exceeded the maximum search distance
         if (Math.abs(current.x - startTileX) > maxSearchDistance || Math.abs(current.y - startTileY) > maxSearchDistance) {
-            // console.log("Max search distance exceeded");
+            console.log(`Max search distance exceeded after ${nodesExplored} nodes`);
             return null;
         }
 
         if (Math.abs(current.x - end.x) < TILE_SIZE && Math.abs(current.y - end.y) < TILE_SIZE) {
+            console.log(`Path found after exploring ${nodesExplored} nodes`);
             let path = [];
             let temp = current;
             while (temp) {
@@ -1819,29 +1894,38 @@ function findPath(startX, startY, endX, endY, isFish, maxSearchDistance = MAX_SE
             
             // Handle snow movement
             if (!isFish && neighborTileType === TILE_TYPES.SNOW) {
-                // Determine if descending or ascending based on height
-                const currentTileX = Math.floor(current.x / TILE_SIZE);
-                const currentTileY = Math.floor(current.y / TILE_SIZE);
-                const neighborTileX = Math.floor(neighborX / TILE_SIZE);
-                const neighborTileY = Math.floor(neighborY / TILE_SIZE);
-                
-                const currentH = heightNoise(currentTileX, currentTileY);
-                const neighborH = heightNoise(neighborTileX, neighborTileY);
-                
-                if (neighborH < currentH) {
-                    // Descending - skiing
-                    isSkiing = true;
-                    isSnowboarding = false;
-                    isClimbing = false;
-                    moveCost = 2.0; // 2x slower than walking
-                } else {
-                    // Ascending - snowboarding
+                if (simpleMode) {
+                    // Simple mode: skip height checks, assume ascending (snowboarding)
                     isSnowboarding = true;
                     isSkiing = false;
                     isClimbing = false;
+                    canMove = true;
                     moveCost = 20.0; // 20x slower than walking
+                } else {
+                    // Determine if descending or ascending based on height
+                    const currentTileX = Math.floor(current.x / TILE_SIZE);
+                    const currentTileY = Math.floor(current.y / TILE_SIZE);
+                    const neighborTileX = Math.floor(neighborX / TILE_SIZE);
+                    const neighborTileY = Math.floor(neighborY / TILE_SIZE);
+                    
+                    const currentH = getHeight(currentTileX, currentTileY);
+                    const neighborH = getHeight(neighborTileX, neighborTileY);
+                    
+                    if (neighborH < currentH) {
+                        // Descending - skiing
+                        isSkiing = true;
+                        isSnowboarding = false;
+                        isClimbing = false;
+                        moveCost = 2.0; // 2x slower than walking
+                    } else {
+                        // Ascending - snowboarding
+                        isSnowboarding = true;
+                        isSkiing = false;
+                        isClimbing = false;
+                        moveCost = 20.0; // 20x slower than walking
+                    }
+                    canMove = true;
                 }
-                canMove = true;
             } else if ((isSkiing || isSnowboarding) && neighborTileType !== TILE_TYPES.SNOW) {
                 isSkiing = false;
                 isSnowboarding = false;
@@ -1878,14 +1962,17 @@ function findPath(startX, startY, endX, endY, isFish, maxSearchDistance = MAX_SE
 
             if (!openSet.contains(neighbor)) {
                 openSet.push(neighbor);
-            } else if (neighbor.g < openSet.getNode(neighbor).g) {
-                openSet.remove(neighbor);
-                openSet.push(neighbor);
+            } else {
+                const existing = openSet.getNode(neighbor);
+                if (existing && neighbor.g < existing.g) {
+                    // Update and re-heapify
+                    openSet.updateNode(existing, neighbor);
+                }
             }
         }
     }
 
-    // console.log("No path found within max search distance");
+    console.log(`No path found after exploring ${nodesExplored} nodes, openSet exhausted`);
     return null;
 }
 
@@ -1894,16 +1981,23 @@ class BinaryHeap {
     constructor(scoreFunction) {
         this.content = [];
         this.scoreFunction = scoreFunction;
+        this.nodeMap = new Map(); // For O(1) lookup instead of O(n)
+    }
+    
+    _getKey(node) {
+        return `${node.x},${node.y},${node.inBoat},${node.isSwimming},${node.isClimbing},${node.isSkiing},${node.isSnowboarding}`;
     }
 
     push(element) {
         this.content.push(element);
+        this.nodeMap.set(this._getKey(element), element);
         this.bubbleUp(this.content.length - 1);
     }
 
     pop() {
         const result = this.content[0];
         const end = this.content.pop();
+        if (result) this.nodeMap.delete(this._getKey(result));
         if (this.content.length > 0) {
             this.content[0] = end;
             this.sinkDown(0);
@@ -1912,14 +2006,22 @@ class BinaryHeap {
     }
 
     remove(node) {
-        const i = this.content.indexOf(node);
+        const key = this._getKey(node);
+        const i = this.content.findIndex(el => this._getKey(el) === key);
+        if (i === -1) return;
+        
         const end = this.content.pop();
-        if (i !== this.content.length - 1) {
+        this.nodeMap.delete(key);
+        
+        if (i !== this.content.length) {
             this.content[i] = end;
-            if (this.scoreFunction(end) < this.scoreFunction(node)) {
-                this.bubbleUp(i);
-            } else {
-                this.sinkDown(i);
+            if (end) {
+                this.nodeMap.set(this._getKey(end), end);
+                if (this.scoreFunction(end) < this.scoreFunction(node)) {
+                    this.bubbleUp(i);
+                } else {
+                    this.sinkDown(i);
+                }
             }
         }
     }
@@ -1929,11 +2031,30 @@ class BinaryHeap {
     }
 
     contains(node) {
-        return this.content.some(el => el.x === node.x && el.y === node.y && el.inBoat === node.inBoat);
+        return this.nodeMap.has(this._getKey(node));
     }
 
     getNode(node) {
-        return this.content.find(el => el.x === node.x && el.y === node.y && el.inBoat === node.inBoat);
+        return this.nodeMap.get(this._getKey(node));
+    }
+
+    updateNode(existing, newValues) {
+        // Find index of existing node
+        const idx = this.content.indexOf(existing);
+        if (idx === -1) return;
+        
+        // Update values
+        existing.g = newValues.g;
+        existing.f = newValues.f;
+        existing.parent = newValues.parent;
+        existing.inBoat = newValues.inBoat;
+        existing.isSwimming = newValues.isSwimming;
+        existing.isClimbing = newValues.isClimbing;
+        existing.isSkiing = newValues.isSkiing;
+        existing.isSnowboarding = newValues.isSnowboarding;
+        
+        // Re-heapify from this position (bubble up since f decreased)
+        this.bubbleUp(idx);
     }
 
     bubbleUp(n) {
@@ -2297,34 +2418,89 @@ async function movePlayer() {
     });
 }
 
-async function gameLoop() {
-    const frameStartTime = performance.now();
-    const frameTime = frameStartTime - lastFrameTime;
-    lastFrameTime = frameStartTime;
-    frameCount++;
+// ============================================================================
+// CENTRALIZED GAME LOOP ARCHITECTURE
+// ============================================================================
+// The game loop is structured with clear separation of concerns:
+//
+// update(dt):  All game state changes (player movement, NPC AI, physics)
+//              Uses delta-time (dt) for frame-rate independent updates
+//
+// render():    All drawing operations (world, entities, UI)
+//              Pure rendering - no state changes
+//
+// gameLoop():  Main scheduler running at ~60 FPS via requestAnimationFrame
+//              Coordinates update → render → debug cycles
+//
+// This architecture prevents:
+// - Stuttering from inconsistent update timing
+// - Movement speed varying with frame rate
+// - Ad-hoc function calls scattered across the codebase
+// ============================================================================
 
-    totalFrameTime += frameTime;
+// Centralized update function - all game state changes happen here
+async function update(dt) {
+    // Only update game state when not paused
+    if (gamePaused) return;
+    
+    // Update player emoji animation
+    measureExecutionTime('updatePlayerEmoji', updatePlayerEmoji);
+    
+    // Update player movement
+    await measureExecutionTime('movePlayer', movePlayer);
+    
+    // Update NPCs
+    measureExecutionTime('moveFish', moveFish);
+    
+    // Reset animal pathfinding slots for this frame before moving animals
+    animalPathfindSlots = animalPathfindBudgetPerFrame;
+    measureExecutionTime('moveAnimals', moveAnimals);
+    
+    // Update UI state
+    measureExecutionTime('updateUI', updateUI);
+}
 
+// Centralized render function - all drawing happens here
+function render() {
+    // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    measureExecutionTime('updatePlayerEmoji', updatePlayerEmoji);
+    // Render world
     measureExecutionTime('drawWorld', drawWorld);
-    updateAndRenderAnimatedEmojis()
+    
+    // Render animated emojis
+    updateAndRenderAnimatedEmojis();
+    
+    // Render NPCs
     measureExecutionTime('drawNPCs', drawNPCs);
+    
+    // Render player
     measureExecutionTime('drawPlayer', drawPlayer);
-    measureExecutionTime('updateUI', updateUI);
+    
+    // Render minimap
     measureExecutionTime('drawMinimap', drawMinimap);
+}
+
+// Main game loop with fixed timestep and delta-time integration
+async function gameLoop() {
+    const currentTime = performance.now();
+    let deltaTime = (currentTime - lastFrameTime) / 1000; // Convert to seconds
+    lastFrameTime = currentTime;
     
-    // Only update game state when not paused
-    if (!gamePaused) {
-        await measureExecutionTime('movePlayer', movePlayer);
-        measureExecutionTime('moveFish', moveFish);
-        // Reset animal pathfinding slots for this frame before moving animals
-        animalPathfindSlots = animalPathfindBudgetPerFrame;
-        measureExecutionTime('moveAnimals', moveAnimals);
-    }
+    // Cap delta time to prevent spiral of death
+    deltaTime = Math.min(deltaTime, MAX_DELTA_TIME);
     
-    drawDebugInfo(frameTime);
+    frameCount++;
+    totalFrameTime += deltaTime * 1000;
+    
+    // Update game state with delta time
+    await update(deltaTime);
+    
+    // Render current state
+    render();
+    
+    // Draw debug info
+    drawDebugInfo(deltaTime * 1000);
 
     requestAnimationFrame(gameLoop);
 }
