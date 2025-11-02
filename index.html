@@ -81,6 +81,11 @@ let worldMapLogicalSize = resizeCanvas(
 let worldMapVisible = false;
 let gamePaused = false;
 
+// Minimap cache to avoid redrawing terrain every frame
+let minimapTerrainCache = null;
+let minimapLastPlayerTileX = null;
+let minimapLastPlayerTileY = null;
+
 const xPosElement = document.getElementById('xPos');
 const yPosElement = document.getElementById('yPos');
 const biomeElement = document.getElementById('biome');
@@ -747,9 +752,16 @@ class Fish {
         let ny = this.y + this.vy * dt;
         const nTileX = Math.floor(nx / TILE_SIZE);
         const nTileY = Math.floor(ny / TILE_SIZE);
-        if (getTileType(nTileX, nTileY) === TILE_TYPES.DEEP_WATER) {
+        const nextTileType = getTileType(nTileX, nTileY);
+        
+        if (nextTileType === TILE_TYPES.DEEP_WATER) {
             this.x = nx;
             this.y = ny;
+        } else if (nextTileType === TILE_TYPES.SHALLOW_WATER) {
+            // Reverse direction when hitting shallow water
+            this.vx = -this.vx;
+            this.vy = -this.vy;
+            // Don't move into shallow water
         } else {
             // Snap back into nearest deep water and steer inward
             const deep = findNearestDeepWater(nx, ny) || findNearestDeepWater(this.x, this.y);
@@ -1923,52 +1935,84 @@ function getTileType(x, y) {
 
 function drawMinimap() {
     return measureExecutionTime('drawMinimap', () => {
-        minimapCtx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
-        
+        const minimapLogicalWidth = 200;
+        const minimapLogicalHeight = 200;
         const minimapTileSize = TILE_SIZE * MINIMAP_SCALE;
-        const visibleTilesX = Math.ceil(minimapCanvas.width / minimapTileSize);
-        const visibleTilesY = Math.ceil(minimapCanvas.height / minimapTileSize);
+        const visibleTilesX = Math.ceil(minimapLogicalWidth / minimapTileSize);
+        const visibleTilesY = Math.ceil(minimapLogicalHeight / minimapTileSize);
         
-        const centerX = Math.floor(minimapCanvas.width / (2 * minimapTileSize));
-        const centerY = Math.floor(minimapCanvas.height / (2 * minimapTileSize));
+        const centerX = Math.floor(minimapLogicalWidth / (2 * minimapTileSize));
+        const centerY = Math.floor(minimapLogicalHeight / (2 * minimapTileSize));
         
-        const startX = Math.floor(player.x / TILE_SIZE) - centerX;
-        const startY = Math.floor(player.y / TILE_SIZE) - centerY;
+        const playerTileX = Math.floor(player.x / TILE_SIZE);
+        const playerTileY = Math.floor(player.y / TILE_SIZE);
+        const startX = playerTileX - centerX;
+        const startY = playerTileY - centerY;
         
-        // Only draw tiles visible on minimap
-        for (let y = 0; y < visibleTilesY; y++) {
-            for (let x = 0; x < visibleTilesX; x++) {
-                const worldX = startX + x;
-                const worldY = startY + y;
-                const tileType = getTileType(worldX, worldY);
-                minimapCtx.fillStyle = getTileColor(tileType);
-                minimapCtx.fillRect(x * minimapTileSize, y * minimapTileSize, minimapTileSize, minimapTileSize);
+        // Only redraw terrain if player moved to a different tile
+        const playerTileMoved = minimapLastPlayerTileX !== playerTileX || minimapLastPlayerTileY !== playerTileY;
+        
+        if (playerTileMoved || !minimapTerrainCache) {
+            // Create or reuse offscreen canvas for terrain
+            if (!minimapTerrainCache) {
+                minimapTerrainCache = document.createElement('canvas');
+                // Cache uses LOGICAL size, not buffer size
+                minimapTerrainCache.width = minimapLogicalWidth;
+                minimapTerrainCache.height = minimapLogicalHeight;
             }
+            
+            const cacheCtx = minimapTerrainCache.getContext('2d');
+            cacheCtx.clearRect(0, 0, minimapTerrainCache.width, minimapTerrainCache.height);
+            
+            // Draw tiles to cache (no DPI scaling needed - cache is logical size)
+            for (let y = 0; y < visibleTilesY; y++) {
+                for (let x = 0; x < visibleTilesX; x++) {
+                    const worldX = startX + x;
+                    const worldY = startY + y;
+                    const tileType = getTileType(worldX, worldY);
+                    cacheCtx.fillStyle = getTileColor(tileType);
+                    cacheCtx.fillRect(x * minimapTileSize, y * minimapTileSize, minimapTileSize, minimapTileSize);
+                }
+            }
+            
+            minimapLastPlayerTileX = playerTileX;
+            minimapLastPlayerTileY = playerTileY;
         }
-    
-        // Draw player at center
+        
+        // Blit cached terrain (minimapCtx already has DPI scaling applied by resizeCanvas)
+        minimapCtx.clearRect(0, 0, minimapLogicalWidth, minimapLogicalHeight);
+        minimapCtx.drawImage(minimapTerrainCache, 0, 0);
+        
+        // Draw player (accounting for sub-tile position)
+        const playerSubTileX = (player.x / TILE_SIZE) - playerTileX;
+        const playerSubTileY = (player.y / TILE_SIZE) - playerTileY;
+        const playerMinimapX = (centerX + playerSubTileX) * minimapTileSize;
+        const playerMinimapY = (centerY + playerSubTileY) * minimapTileSize;
         minimapCtx.fillStyle = 'red';
-        minimapCtx.fillRect(centerX * minimapTileSize, centerY * minimapTileSize, minimapTileSize, minimapTileSize);
+        minimapCtx.fillRect(playerMinimapX, playerMinimapY, minimapTileSize, minimapTileSize);
         
         // Draw boats
         minimapCtx.fillStyle = 'brown';
-        boats.forEach(boat => {
+        for (let i = 0; i < boats.length; i++) {
+            const boat = boats[i];
             const boatMinimapX = (boat.x / TILE_SIZE - startX) * minimapTileSize;
             const boatMinimapY = (boat.y / TILE_SIZE - startY) * minimapTileSize;
-            if (boatMinimapX >= 0 && boatMinimapX < minimapCanvas.width && boatMinimapY >= 0 && boatMinimapY < minimapCanvas.height) {
+            if (boatMinimapX >= 0 && boatMinimapX < minimapLogicalWidth && boatMinimapY >= 0 && boatMinimapY < minimapLogicalHeight) {
                 minimapCtx.fillRect(boatMinimapX, boatMinimapY, minimapTileSize, minimapTileSize);
             }
-        });
-    
-        // Draw gold
+        }
+        
+        // Draw gold (4x size)
         minimapCtx.fillStyle = 'gold';
-        goldNuggets.forEach(gold => {
+        for (let i = 0; i < goldNuggets.length; i++) {
+            const gold = goldNuggets[i];
             const goldMinimapX = (gold.x / TILE_SIZE - startX) * minimapTileSize;
             const goldMinimapY = (gold.y / TILE_SIZE - startY) * minimapTileSize;
-            if (goldMinimapX >= 0 && goldMinimapX < minimapCanvas.width && goldMinimapY >= 0 && goldMinimapY < minimapCanvas.height) {
-                minimapCtx.fillRect(goldMinimapX, goldMinimapY, minimapTileSize, minimapTileSize);
+            if (goldMinimapX >= 0 && goldMinimapX < minimapLogicalWidth && goldMinimapY >= 0 && goldMinimapY < minimapLogicalHeight) {
+                const goldSize = minimapTileSize * 4;
+                minimapCtx.fillRect(goldMinimapX - goldSize / 2, goldMinimapY - goldSize / 2, goldSize, goldSize);
             }
-        });
+        }
     });
 }
 
@@ -2196,27 +2240,25 @@ worldMapCanvas.addEventListener('click', async (event) => {
 minimapCanvas.addEventListener('click', async (event) => {
     if (worldMapVisible) return; // Don't handle clicks when world map is open
     
-    // Get click position relative to canvas (using logical dimensions)
+    // Get click position relative to canvas
     const rect = minimapCanvas.getBoundingClientRect();
-    const minimapWidth = 200;
-    const minimapHeight = 200;
-    const scaleX = minimapWidth / rect.width;
-    const scaleY = minimapHeight / rect.height;
-    const clickX = (event.clientX - rect.left) * scaleX;
-    const clickY = (event.clientY - rect.top) * scaleY;
+    // Use logical size (not buffer size which is scaled by DPI)
+    const clickX = event.clientX - rect.left;
+    const clickY = event.clientY - rect.top;
     
     // Calculate minimap scale (MUST match drawMinimap)
     const minimapTileSize = TILE_SIZE * MINIMAP_SCALE;
-    const visibleTilesX = Math.ceil(minimapWidth / minimapTileSize);
-    const visibleTilesY = Math.ceil(minimapHeight / minimapTileSize);
     
-    const centerX = Math.floor(minimapWidth / (2 * minimapTileSize));
-    const centerY = Math.floor(minimapHeight / (2 * minimapTileSize));
+    const centerX = Math.floor(200 / (2 * minimapTileSize));
+    const centerY = Math.floor(200 / (2 * minimapTileSize));
     
-    const startX = Math.floor(player.x / TILE_SIZE) - centerX;
-    const startY = Math.floor(player.y / TILE_SIZE) - centerY;
+    // MUST match drawMinimap calculation exactly
+    const playerTileX = Math.floor(player.x / TILE_SIZE);
+    const playerTileY = Math.floor(player.y / TILE_SIZE);
+    const startX = playerTileX - centerX;
+    const startY = playerTileY - centerY;
     
-    // Convert minimap click to world tile coordinates (match drawMinimap logic)
+    // Convert minimap click to world tile coordinates
     const clickTileX = Math.floor(clickX / minimapTileSize);
     const clickTileY = Math.floor(clickY / minimapTileSize);
     
@@ -2839,11 +2881,23 @@ function cullEntities() {
     const cullDistance = 3000; // Remove entities more than 3000px from player
     const minEntities = 10; // Keep at least this many entities of each type
     
+    // Calculate viewport bounds for frustum check
+    const viewLeft = camera.x;
+    const viewTop = camera.y;
+    const viewRight = camera.x + canvasLogicalSize.width;
+    const viewBottom = camera.y + canvasLogicalSize.height;
+    
+    // Helper to check if entity is in camera frustum
+    const isInFrustum = (x, y) => {
+        return x >= viewLeft && x <= viewRight && y >= viewTop && y <= viewBottom;
+    };
+    
     // Cull land animals
     if (landAnimals.length > minEntities) {
         landAnimals = landAnimals.filter(animal => {
             const dist = distance(player.x, player.y, animal.x, animal.y);
-            return dist <= cullDistance;
+            // Keep if within distance OR visible in camera
+            return dist <= cullDistance || isInFrustum(animal.x, animal.y);
         });
     }
     
@@ -2851,7 +2905,8 @@ function cullEntities() {
     if (fishFlock.length > minEntities) {
         fishFlock = fishFlock.filter(fish => {
             const dist = distance(player.x, player.y, fish.x, fish.y);
-            return dist <= cullDistance;
+            // Keep if within distance OR visible in camera
+            return dist <= cullDistance || isInFrustum(fish.x, fish.y);
         });
     }
     
@@ -2859,7 +2914,8 @@ function cullEntities() {
     if (boats.length > minEntities) {
         boats = boats.filter(boat => {
             const dist = distance(player.x, player.y, boat.x, boat.y);
-            return dist <= cullDistance;
+            // Keep if within distance OR visible in camera
+            return dist <= cullDistance || isInFrustum(boat.x, boat.y);
         });
     }
     
@@ -2867,7 +2923,8 @@ function cullEntities() {
     if (goldNuggets.length > minEntities) {
         goldNuggets = goldNuggets.filter(gold => {
             const dist = distance(player.x, player.y, gold.x, gold.y);
-            return dist <= cullDistance;
+            // Keep if within distance OR visible in camera
+            return dist <= cullDistance || isInFrustum(gold.x, gold.y);
         });
     }
 }
