@@ -1846,7 +1846,9 @@ worldMapCanvas.addEventListener('click', async (event) => {
     const pathStartTime = performance.now();
     path = findPath(player.x, player.y, worldX, worldY, undefined, MAX_SEARCH_DISTANCE, true); // true = simple mode (no height checks)
     const pathEndTime = performance.now();
-    console.log(`Pathfinding took ${(pathEndTime - pathStartTime).toFixed(2)}ms, path found: ${path !== null}, path length: ${path ? path.length : 0}`);
+    if (debugMode) {
+        console.log(`Pathfinding took ${(pathEndTime - pathStartTime).toFixed(2)}ms, path found: ${path !== null}, path length: ${path ? path.length : 0}`);
+    }
 });
 
 // Minimap click handler
@@ -1982,12 +1984,12 @@ function findPath(startX, startY, endX, endY, isFish, maxSearchDistance = MAX_SE
 
         // Check if we've exceeded the maximum search distance
         if (Math.abs(current.x - startTileX) > maxSearchDistance || Math.abs(current.y - startTileY) > maxSearchDistance) {
-            console.log(`Max search distance exceeded after ${nodesExplored} nodes`);
+            if (debugMode) console.log(`Max search distance exceeded after ${nodesExplored} nodes`);
             return null;
         }
 
         if (Math.abs(current.x - end.x) < TILE_SIZE && Math.abs(current.y - end.y) < TILE_SIZE) {
-            console.log(`Path found after exploring ${nodesExplored} nodes`);
+            if (debugMode) console.log(`Path found after exploring ${nodesExplored} nodes`);
             let path = [];
             let temp = current;
             while (temp) {
@@ -2156,7 +2158,7 @@ function findPath(startX, startY, endX, endY, isFish, maxSearchDistance = MAX_SE
         }
     }
 
-    console.log(`No path found after exploring ${nodesExplored} nodes, openSet exhausted`);
+    if (debugMode) console.log(`No path found after exploring ${nodesExplored} nodes, openSet exhausted`);
     return null;
 }
 
@@ -3020,7 +3022,7 @@ canvas.addEventListener('click', async (event) => {
     path = findPath(player.x, player.y, centeredX, centeredY, undefined, MAX_SEARCH_DISTANCE);
 
     if (!path) {
-        console.log('No path found or destination too far');
+        if (debugMode) console.log('No path found or destination too far');
         target = null;
         statusElement.textContent = 'Destination unreachable or too far';
     } else {
@@ -3038,7 +3040,7 @@ pathfindingForm.addEventListener('submit', async (event) => {
     path = findPath(player.x, player.y, targetX, targetY, undefined, MAX_SEARCH_DISTANCE);
 
     if (!path) {
-        console.log('No path found or destination too far');
+        if (debugMode) console.log('No path found or destination too far');
         target = null;
         statusElement.textContent = 'Destination unreachable or too far';
     } else {
