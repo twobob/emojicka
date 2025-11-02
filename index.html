@@ -1830,12 +1830,6 @@ worldMapCanvas.addEventListener('click', async (event) => {
     const clickX = (event.clientX - rect.left) * scaleX;
     const clickY = (event.clientY - rect.top) * scaleY;
     
-    // Close the world map immediately (after getting rect, before heavy calculations)
-    worldMapVisible = false;
-    game.resume();
-    worldMapCanvas.style.display = 'none';
-    minimapCanvas.style.display = 'block';
-    
     const chunkIterStart = performance.now();
     // Find bounds of all generated chunks (same as drawWorldMap)
     let minChunkX = Infinity, maxChunkX = -Infinity;
@@ -1897,6 +1891,16 @@ worldMapCanvas.addEventListener('click', async (event) => {
     const pathEndTime = performance.now();
     if (debugMode) {
         console.log(`Pathfinding took ${(pathEndTime - pathStartTime).toFixed(2)}ms, path found: ${path !== null}, path length: ${path ? path.length : 0}`);
+    }
+    
+    // Only close world map if path was found
+    if (path) {
+        worldMapVisible = false;
+        game.resume();
+        worldMapCanvas.style.display = 'none';
+        minimapCanvas.style.display = 'block';
+    } else {
+        console.log('No path found - world map remains open');
     }
 });
 
