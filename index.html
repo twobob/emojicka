@@ -1902,7 +1902,6 @@ worldMapCanvas.addEventListener('click', async (event) => {
     } else {
         console.log('No path found - world map remains open');
         // Flash world map red to indicate unreachable destination
-        const originalOpacity = worldMapCanvas.style.opacity || '1';
         let flashProgress = 0;
         const flashDuration = 500; // 0.5 seconds
         const flashStart = performance.now();
@@ -1912,13 +1911,18 @@ worldMapCanvas.addEventListener('click', async (event) => {
             flashProgress = elapsed / flashDuration;
             
             if (flashProgress < 1) {
-                // Sine wave for smooth fade in and out
+                // Redraw world map
+                drawWorldMap();
+                
+                // Draw red overlay with sine wave fade
                 const alpha = Math.sin(flashProgress * Math.PI) * 0.3; // 30% red at peak
-                worldMapCanvas.style.backgroundColor = `rgba(255, 0, 0, ${alpha})`;
+                worldMapCtx.fillStyle = `rgba(255, 0, 0, ${alpha})`;
+                worldMapCtx.fillRect(0, 0, worldMapCanvas.width, worldMapCanvas.height);
+                
                 requestAnimationFrame(flashRed);
             } else {
-                // Reset to transparent
-                worldMapCanvas.style.backgroundColor = 'transparent';
+                // Final redraw without overlay
+                drawWorldMap();
             }
         }
         
